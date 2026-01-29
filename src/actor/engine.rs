@@ -145,7 +145,7 @@ impl Engine {
     }
 
     /// Get a mutable reference to the buffer.
-    pub fn buffer_mut(&mut self) -> &mut Buffer {
+    pub const fn buffer_mut(&mut self) -> &mut Buffer {
         &mut self.buffer
     }
 
