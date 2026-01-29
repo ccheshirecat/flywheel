@@ -188,8 +188,8 @@ fn main() -> std::io::Result<()> {
                 last_tick = Instant::now();
                 let mut buffer_dirty = false;
 
-                // 1. Generate Matrix Text (Fast Path - Bypass Buffer)
-                let mut fast_output: Vec<u8> = Vec::with_capacity(4096);
+                // 1. Generate Matrix Text
+                // The push() API handles Fast/Slow path automatically.
                 for _ in 0..50 {
                     token_count += 1;
                     let color = rng.next_color();
@@ -197,16 +197,13 @@ fn main() -> std::io::Result<()> {
                     let c = rng.next_char();
                     let mut buf = [0u8; 4];
                     let s_char = c.encode_utf8(&mut buf);
-                    if stream.append_fast_into(s_char, &mut fast_output) {
-                        // All good, handled by RawOutput
-                    } else {
-                        // Slow path hit (wrap or scroll)
+                    
+                    // Just push. The engine handles the rest.
+                    stream.push(&engine, s_char);
+                    
+                    if stream.needs_redraw() {
                         buffer_dirty = true;
                     }
-                }
-
-                if !fast_output.is_empty() {
-                    engine.write_raw(fast_output);
                 }
 
                 // 2. Update Stats (Throttle)

@@ -2,8 +2,22 @@
 //!
 //! This widget provides optimistic append with automatic fallback to
 //! slow-path rendering when needed.
+//!
+//! # Usage
+//!
+//! The recommended API is [`StreamWidget::push`], which handles all
+//! rendering optimizations internally:
+//!
+//! ```ignore
+//! stream.push(&engine, "Hello world");
+//! ```
+//!
+//! The engine automatically chooses between:
+//! - **Fast Path**: Direct ANSI emission for simple appends (0ms latency)
+//! - **Slow Path**: Buffer update for wrapping/scrolling (next frame)
 
 use super::scroll_buffer::ScrollBuffer;
+use crate::actor::Engine;
 use crate::buffer::{Buffer, Cell, Rgb};
 use crate::layout::Rect;
 use std::io::Write;
@@ -428,6 +442,37 @@ impl StreamWidget {
         } else {
             false
         }
+    }
+
+    /// Push text to the stream with automatic optimization.
+    ///
+    /// This is the **recommended API** for appending content. It handles
+    /// all rendering decisions internally:
+    ///
+    /// - **Fast Path**: If the text fits on the current line without wrapping
+    ///   or scrolling, ANSI codes are emitted directly to the terminal for
+    ///   zero-latency display.
+    /// - **Slow Path**: If wrapping or scrolling is required, the internal
+    ///   buffer is updated and the widget is marked dirty for the next frame.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // Just push. The engine handles the rest.
+    /// stream.push(&engine, "Hello ");
+    /// stream.push(&engine, "world!");
+    /// ```
+    pub fn push(&mut self, engine: &Engine, text: &str) {
+        let result = self.append(text);
+        
+        if let AppendResult::FastPath { .. } = result {
+            // Zero-latency path: emit ANSI directly
+            let mut output = Vec::with_capacity(64);
+            self.write_fast_path(result, text, &mut output);
+            engine.write_raw(output);
+        }
+        // SlowPath/Empty: Buffer updated or nothing to do.
+        // The render cycle will pick up dirty state.
     }
 
     /// Check if a full redraw is needed.

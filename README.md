@@ -68,10 +68,9 @@ fn main() -> std::io::Result<()> {
     // Simulate LLM streaming
     for token in ["Hello, ", "world! ", "This ", "is ", "Flywheel."] {
         stream.set_fg(Rgb::new(0, 255, 128)); // Green text
-        stream.append(token);
         
-        stream.render(engine.buffer_mut());
-        engine.request_update();
+        // Just push. The engine handles Fast/Slow path automatically.
+        stream.push(&engine, token);
         
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
@@ -199,11 +198,14 @@ stream.set_fg(Rgb::new(255, 128, 0));  // Orange text
 stream.set_bg(Rgb::new(20, 20, 20));   // Dark background
 stream.set_bold(true);
 
-// Content
-stream.append("Hello");                 // Returns AppendResult
-stream.append_fast_into("x", &mut buf); // Fast path with raw output
+// Content (Recommended API)
+stream.push(&engine, "Hello");          // Automatic Fast/Slow path handling
 stream.newline();
 stream.clear();
+
+// Low-level API (for advanced use cases)
+stream.append("text");                  // Returns AppendResult, manual handling
+stream.append_fast_into("x", &mut buf); // Manual Fast Path with raw output
 
 // Scrolling (Sticky Scroll: auto-scroll only if at bottom)
 stream.scroll_up(lines);
