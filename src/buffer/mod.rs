@@ -5,9 +5,11 @@
 //! - [`Buffer`]: A grid of cells representing the terminal screen
 //! - [`Rgb`]: True-color representation
 //! - [`Modifiers`]: Text style bitflags
+//! - [`diff`]: Diffing engine for generating minimal ANSI sequences
 
 mod cell;
 mod buffer;
+pub mod diff;
 
 pub use cell::{Cell, CellFlags, Modifiers, Rgb};
 pub use buffer::Buffer;

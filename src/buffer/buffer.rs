@@ -193,6 +193,14 @@ impl Buffer {
         }
     }
 
+    /// Get an overflow grapheme by its index.
+    ///
+    /// This is used by the diffing engine when rendering overflow cells.
+    #[inline]
+    pub fn get_overflow(&self, index: u32) -> Option<&str> {
+        self.overflow.get(&index).map(String::as_str)
+    }
+
     /// Fill a rectangular region with a cell.
     pub fn fill_rect(&mut self, x: u16, y: u16, width: u16, height: u16, cell: Cell) {
         for row in y..(y + height).min(self.height) {

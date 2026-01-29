@@ -25,6 +25,10 @@ path = "examples/streaming_demo.rs"
 name = "cell_benchmark"
 harness = false
 
+[[bench]]
+name = "diff_benchmark"
+harness = false
+
 [dependencies]
 # Terminal backend
 crossterm = "0.28"
