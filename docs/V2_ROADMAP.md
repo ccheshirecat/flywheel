@@ -9,127 +9,70 @@ V2 represents a significant architectural evolution focused on three pillars:
 
 ---
 
-## Phase 1: Buffer Synchronization Fix (Priority: Critical)
+## Phase 1: Buffer Synchronization Fix (Priority: Critical) ✅ COMPLETED
 
 ### Problem
 The "ghost character" bug occurs because Fast Path writes directly to the terminal, bypassing the Buffer. The Renderer's `current_buffer` doesn't know about these writes, so diffing skips them.
 
-### Solution: Shadow Tracking
+### Solution: Force Full Redraw on Path Switch
 
+Instead of complex shadow tracking, we use a simpler approach:
+- After any `RawOutput`, set `needs_full_redraw = true`
+- The next `Update` command triggers a full redraw, resyncing state
+- This maintains Fast Path performance for consecutive writes
+- Only pays the resync cost when switching from Fast to Slow path
+
+### Implementation
 ```rust
-struct Renderer {
-    current_buffer: Buffer,
-    shadow_mask: BitVec,  // Tracks cells "defiled" by RawOutput
-}
-
-impl Renderer {
-    fn write_raw(&mut self, bytes: &[u8], dirty_region: Rect) {
-        self.stdout.write_all(bytes)?;
-        // Mark cells as "unknown" - force re-emit on next diff
-        for y in dirty_region.y..dirty_region.y + dirty_region.height {
-            for x in dirty_region.x..dirty_region.x + dirty_region.width {
-                self.shadow_mask.set(y * width + x, true);
-            }
-        }
-    }
-
-    fn render_diff(&mut self, next: &Buffer) {
-        for (i, (current, next)) in self.current_buffer.iter().zip(next.iter()).enumerate() {
-            // Force re-emit if shadow mask is set
-            if self.shadow_mask.get(i) || current != next {
-                self.emit_cell(i, next);
-                self.shadow_mask.set(i, false);
-            }
-        }
-    }
+fn write_raw(&mut self, bytes: &[u8]) -> io::Result<()> {
+    self.stdout.write_all(bytes)?;
+    self.stdout.flush()?;
+    // Force resync on next Update
+    self.needs_full_redraw = true;
+    self.diff_state.reset();
+    Ok(())
 }
 ```
 
-### Tasks
-- [ ] Add `shadow_mask: BitVec` to `Renderer`
-- [ ] Modify `RenderCommand::RawOutput` to include dirty region
-- [ ] `write_fast_path` must report affected cells
-- [ ] `render_diff` checks shadow mask before skipping cells
-
-### Estimated Effort: 2-3 hours
+### Status: ✅ Complete (Committed: 2024-01-30)
 
 ---
 
-## Phase 2: Async-Friendly Ticker (Priority: High)
+## Phase 2: Async-Friendly Ticker (Priority: High) ✅ COMPLETED
 
 ### Problem
 `Engine::end_frame()` calls `std::thread::sleep()`, blocking the calling thread. This is incompatible with async runtimes like tokio.
 
-### Current
+### Solution: TickerActor
+
+Created a dedicated `TickerActor` that generates timing events independently:
+
 ```rust
-pub fn end_frame(&mut self) {
-    self.request_update();
-    let elapsed = self.frame_start.elapsed();
-    if elapsed < self.frame_duration {
-        std::thread::sleep(self.frame_duration - elapsed);  // BLOCKING!
-    }
-}
-```
+// Spawn ticker for 60 FPS
+let ticker = TickerActor::spawn(Duration::from_micros(16_666));
 
-### Solution: Decouple Timing from Engine
-
-Option A: **Ticker Actor** (Recommended)
-```rust
-struct TickerActor {
-    interval: Duration,
-    tick_tx: Sender<()>,
-}
-
-impl TickerActor {
-    fn run(self) {
-        loop {
-            std::thread::sleep(self.interval);
-            if self.tick_tx.send(()).is_err() {
-                break;
-            }
-        }
-    }
-}
-
-// User code
-loop {
+// Event-driven loop using select!
+while engine.is_running() {
     select! {
         recv(engine.input_receiver()) -> event => handle_input(event),
-        recv(engine.tick_receiver()) -> _ => {
+        recv(ticker.receiver()) -> tick => {
             generate_content();
             engine.request_update();
         }
     }
 }
+
+// Clean shutdown
+ticker.join();
 ```
 
-Option B: **User-Controlled Timing**
-```rust
-// Remove end_frame entirely. User manages their own timing.
-loop {
-    let deadline = Instant::now() + Duration::from_millis(16);
-    
-    // Process events until deadline
-    while Instant::now() < deadline {
-        match engine.input_receiver().recv_timeout(deadline - Instant::now()) {
-            Ok(event) => handle(event),
-            Err(Timeout) => break,
-        }
-    }
-    
-    // Render
-    engine.request_update();
-}
-```
+### Features
+- Non-blocking: Ticker runs in dedicated thread
+- Smart pacing: Uses `try_send` to prevent tick queue buildup
+- Clean shutdown: Respects shutdown signal via `AtomicBool`
+- Frame info: `Tick` struct includes frame number and elapsed time
 
-### Tasks
-- [ ] Create `TickerActor` in `src/actor/ticker.rs`
-- [ ] Add `tick_rx: Receiver<()>` to `Engine`
-- [ ] Add `Engine::tick_receiver()` accessor
-- [ ] Deprecate `end_frame()` (keep for backward compat)
-- [ ] Update `streaming_demo.rs` to use `select!`
-
-### Estimated Effort: 3-4 hours
+### Status: ✅ Complete (Committed: 2024-01-30)
 
 ---
 
@@ -240,15 +183,15 @@ trait Widget {
 
 ## Implementation Order
 
-| Phase | Priority | Effort | Dependencies |
-|-------|----------|--------|--------------|
-| 1. Buffer Sync Fix | Critical | 2-3h | None |
-| 2. Async Ticker | High | 3-4h | None |
-| 3. Rope Buffer | Medium | 4-6h | None |
-| 4. Widget System | Medium | 6-8h | Phase 1 |
-| 5. Docs & Polish | High | 2-3h | All |
+| Phase | Priority | Status | Effort |
+|-------|----------|--------|--------|
+| 1. Buffer Sync Fix | Critical | ✅ Done | 1h |
+| 2. Async Ticker | High | ✅ Done | 2h |
+| 3. Rope Buffer | Medium | 📋 Planned | 4-6h |
+| 4. Widget System | Medium | 📋 Planned | 6-8h |
+| 5. Docs & Polish | High | 📋 Planned | 2-3h |
 
-**Total Estimated Effort: 17-24 hours**
+**Completed: 3 hours | Remaining: 12-17 hours**
 
 ---
 
