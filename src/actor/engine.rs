@@ -15,7 +15,7 @@ use crossterm::{
     execute,
     terminal::{self, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use std::io::{self, Write};
+use std::io::{self};
 use std::time::{Duration, Instant};
 
 /// Configuration for the Engine.
@@ -74,11 +74,19 @@ pub struct Engine {
 
 impl Engine {
     /// Create a new engine with default configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if terminal setup fails (raw mode, alternate screen, etc.).
     pub fn new() -> io::Result<Self> {
         Self::with_config(EngineConfig::default())
     }
 
     /// Create a new engine with custom configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if terminal setup fails.
     pub fn with_config(config: EngineConfig) -> io::Result<Self> {
         // Get terminal size
         let (width, height) = terminal::size()?;
@@ -122,17 +130,17 @@ impl Engine {
     }
 
     /// Get the terminal width.
-    pub fn width(&self) -> u16 {
+    pub const fn width(&self) -> u16 {
         self.width
     }
 
     /// Get the terminal height.
-    pub fn height(&self) -> u16 {
+    pub const fn height(&self) -> u16 {
         self.height
     }
 
     /// Get a reference to the buffer.
-    pub fn buffer(&self) -> &Buffer {
+    pub const fn buffer(&self) -> &Buffer {
         &self.buffer
     }
 
@@ -141,13 +149,18 @@ impl Engine {
         &mut self.buffer
     }
 
+    /// Get the input receiver for event-driven loops.
+    pub const fn input_receiver(&self) -> &Receiver<InputEvent> {
+        &self.input_rx
+    }
+
     /// Check if the engine is still running.
-    pub fn is_running(&self) -> bool {
+    pub const fn is_running(&self) -> bool {
         self.running
     }
 
     /// Stop the engine.
-    pub fn stop(&mut self) {
+    pub const fn stop(&mut self) {
         self.running = false;
     }
 
@@ -180,17 +193,22 @@ impl Engine {
 
     /// Request a full redraw.
     pub fn request_redraw(&self) {
-        let _ = self.render_tx.send(RenderCommand::FullRedraw);
+        let _ = self.render_tx.send(RenderCommand::FullRedraw(Box::new(self.buffer.clone())));
     }
 
     /// Request a diff-based update.
     pub fn request_update(&self) {
-        let _ = self.render_tx.send(RenderCommand::Update);
+        let _ = self.render_tx.send(RenderCommand::Update(Box::new(self.buffer.clone())));
     }
 
     /// Set the cursor position (or hide it).
     pub fn set_cursor(&self, x: Option<u16>, y: u16) {
         let _ = self.render_tx.send(RenderCommand::SetCursor { x, y });
+    }
+
+    /// Write raw bytes to the output (Fast Path).
+    pub fn write_raw(&self, bytes: Vec<u8>) {
+        let _ = self.render_tx.send(RenderCommand::RawOutput { bytes });
     }
 
     /// Handle a resize event.
@@ -225,7 +243,7 @@ impl Engine {
     }
 
     /// Get the current frame count.
-    pub fn frame_count(&self) -> u64 {
+    pub const fn frame_count(&self) -> u64 {
         self.frame_count
     }
 
@@ -259,7 +277,7 @@ impl Engine {
                 break;
             }
             let width = self.buffer.set_grapheme(col, y, grapheme, fg, bg);
-            col += width as u16;
+            col += u16::from(width);
         }
         col - x
     }

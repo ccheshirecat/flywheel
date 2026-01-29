@@ -63,13 +63,13 @@ impl Buffer {
 
     /// Get the total number of cells.
     #[inline]
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.cells.len()
     }
 
     /// Check if the buffer is empty (should never be true after construction).
     #[inline]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.cells.is_empty()
     }
 
@@ -89,7 +89,7 @@ impl Buffer {
     ///
     /// Returns `None` if coordinates are out of bounds.
     #[inline]
-    pub fn index_of(&self, x: u16, y: u16) -> Option<usize> {
+    pub const fn index_of(&self, x: u16, y: u16) -> Option<usize> {
         if x < self.width && y < self.height {
             Some((y as usize) * (self.width as usize) + (x as usize))
         } else {
@@ -99,7 +99,8 @@ impl Buffer {
 
     /// Convert a linear index to (x, y) coordinates.
     #[inline]
-    pub fn coords_of(&self, index: usize) -> Option<(u16, u16)> {
+    #[allow(clippy::cast_possible_truncation)]
+    pub const fn coords_of(&self, index: usize) -> Option<(u16, u16)> {
         if index < self.cells.len() {
             let x = (index % (self.width as usize)) as u16;
             let y = (index / (self.width as usize)) as u16;
@@ -149,7 +150,7 @@ impl Buffer {
             return 0;
         };
 
-        let width = unicode_width::UnicodeWidthStr::width(grapheme) as u8;
+        let width = u8::try_from(unicode_width::UnicodeWidthStr::width(grapheme)).unwrap_or(1);
 
         // Try to create an inline cell
         let cell = if let Some(mut cell) = Cell::from_grapheme(grapheme) {
@@ -166,11 +167,10 @@ impl Buffer {
         self.cells[idx] = cell;
 
         // Handle wide characters (CJK)
-        if width == 2 {
-            if let Some(next_idx) = self.index_of(x + 1, y) {
+        if width == 2
+            && let Some(next_idx) = self.index_of(x + 1, y) {
                 self.cells[next_idx] = Cell::wide_continuation().with_bg(bg);
             }
-        }
 
         width
     }
@@ -254,7 +254,7 @@ impl Buffer {
     /// Copy content from another buffer.
     ///
     /// The buffers must have the same dimensions.
-    pub fn copy_from(&mut self, other: &Buffer) {
+    pub fn copy_from(&mut self, other: &Self) {
         debug_assert_eq!(self.width, other.width);
         debug_assert_eq!(self.height, other.height);
         self.cells.copy_from_slice(&other.cells);
@@ -265,7 +265,7 @@ impl Buffer {
     /// Swap the contents of two buffers.
     ///
     /// This is O(1) - just pointer swaps.
-    pub fn swap(&mut self, other: &mut Buffer) {
+    pub const fn swap(&mut self, other: &mut Self) {
         std::mem::swap(&mut self.cells, &mut other.cells);
         std::mem::swap(&mut self.width, &mut other.width);
         std::mem::swap(&mut self.height, &mut other.height);
@@ -298,7 +298,7 @@ impl std::fmt::Debug for Buffer {
             .field("height", &self.height)
             .field("overflow_count", &self.overflow.len())
             .field("memory_bytes", &self.memory_usage())
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 

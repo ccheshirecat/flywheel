@@ -46,6 +46,8 @@ bitflags = "2.6"
 [dev-dependencies]
 # Benchmarking
 criterion = { version = "0.5", features = ["html_reports"] }
+sysinfo = "0.30"
+crossbeam-channel = "0.5"
 
 # Property-based testing (optional, for fuzzing)
 # proptest = "1.5"

@@ -30,7 +30,6 @@
 
 // FFI modules intentionally use unsafe and no_mangle
 #![allow(unsafe_op_in_unsafe_fn)]
-#![allow(clippy::missing_safety_doc)]
 #![allow(clippy::not_unsafe_ptr_arg_deref)]
 
 use crate::actor::{Engine, InputEvent, KeyCode};
@@ -95,7 +94,7 @@ pub enum FlywheelEventType {
 pub struct FlywheelKeyEvent {
     /// The character (for printable keys), or 0.
     pub char_code: u32,
-    /// Special key code (see FLYWHEEL_KEY_* constants).
+    /// Special key code (see `FLYWHEEL_KEY_*` constants).
     pub key_code: c_int,
     /// Modifier flags.
     pub modifiers: c_uint,
@@ -116,9 +115,9 @@ pub struct FlywheelResizeEvent {
 pub struct FlywheelEvent {
     /// Event type.
     pub event_type: FlywheelEventType,
-    /// Key event data (valid if event_type == Key).
+    /// Key event data (valid if `event_type` == Key).
     pub key: FlywheelKeyEvent,
-    /// Resize event data (valid if event_type == Resize).
+    /// Resize event data (valid if `event_type` == Resize).
     pub resize: FlywheelResizeEvent,
 }
 
@@ -171,10 +170,10 @@ pub const FLYWHEEL_MOD_SUPER: c_uint = 8;
 /// Returns NULL on failure.
 #[unsafe(no_mangle)]
 pub extern "C" fn flywheel_engine_new() -> *mut FlywheelEngine {
-    match Engine::new() {
-        Ok(engine) => Box::into_raw(Box::new(FlywheelEngine(engine))),
-        Err(_) => ptr::null_mut(),
-    }
+    Engine::new().map_or(
+        ptr::null_mut(),
+        |engine| Box::into_raw(Box::new(FlywheelEngine(engine)))
+    )
 }
 
 /// Destroy a Flywheel engine.
@@ -187,7 +186,7 @@ pub unsafe extern "C" fn flywheel_engine_destroy(engine: *mut FlywheelEngine) {
 
 /// Get the terminal width.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn flywheel_engine_width(engine: *const FlywheelEngine) -> u16 {
+pub const unsafe extern "C" fn flywheel_engine_width(engine: *const FlywheelEngine) -> u16 {
     if engine.is_null() {
         return 0;
     }
@@ -196,7 +195,7 @@ pub unsafe extern "C" fn flywheel_engine_width(engine: *const FlywheelEngine) ->
 
 /// Get the terminal height.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn flywheel_engine_height(engine: *const FlywheelEngine) -> u16 {
+pub const unsafe extern "C" fn flywheel_engine_height(engine: *const FlywheelEngine) -> u16 {
     if engine.is_null() {
         return 0;
     }
@@ -205,7 +204,7 @@ pub unsafe extern "C" fn flywheel_engine_height(engine: *const FlywheelEngine) -
 
 /// Check if the engine is still running.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn flywheel_engine_is_running(engine: *const FlywheelEngine) -> bool {
+pub const unsafe extern "C" fn flywheel_engine_is_running(engine: *const FlywheelEngine) -> bool {
     if engine.is_null() {
         return false;
     }
@@ -232,8 +231,8 @@ pub unsafe extern "C" fn flywheel_engine_poll_event(
 
     match (*engine).0.poll_input() {
         Some(InputEvent::Key { code, modifiers }) => {
-            let (char_code, key_code) = convert_key_code(&code);
-            let mods = convert_modifiers(&modifiers);
+            let (char_code, key_code) = convert_key_code(code);
+            let mods = convert_modifiers(modifiers);
 
             (*event_out).event_type = FlywheelEventType::Key;
             (*event_out).key = FlywheelKeyEvent {
@@ -309,6 +308,7 @@ pub unsafe extern "C" fn flywheel_engine_end_frame(engine: *mut FlywheelEngine) 
 
 /// Set a cell at the given position.
 #[unsafe(no_mangle)]
+#[allow(clippy::cast_sign_loss)] // c_char may be signed
 pub unsafe extern "C" fn flywheel_engine_set_cell(
     engine: *mut FlywheelEngine,
     x: u16,
@@ -340,9 +340,8 @@ pub unsafe extern "C" fn flywheel_engine_draw_text(
         return 0;
     }
 
-    let text_str = match CStr::from_ptr(text).to_str() {
-        Ok(s) => s,
-        Err(_) => return 0,
+    let Ok(text_str) = CStr::from_ptr(text).to_str() else {
+        return 0;
     };
 
     (*engine)
@@ -360,6 +359,7 @@ pub unsafe extern "C" fn flywheel_engine_clear(engine: *mut FlywheelEngine) {
 
 /// Fill a rectangle with a character.
 #[unsafe(no_mangle)]
+#[allow(clippy::cast_sign_loss)] // c_char may be signed
 pub unsafe extern "C" fn flywheel_engine_fill_rect(
     engine: *mut FlywheelEngine,
     x: u16,
@@ -408,15 +408,13 @@ pub unsafe extern "C" fn flywheel_stream_append(
         return -1;
     }
 
-    let text_str = match CStr::from_ptr(text).to_str() {
-        Ok(s) => s,
-        Err(_) => return -1,
+    let Ok(text_str) = CStr::from_ptr(text).to_str() else {
+        return -1;
     };
 
     match (*stream).0.append(text_str) {
         AppendResult::FastPath { .. } => 1,
-        AppendResult::SlowPath { .. } => 0,
-        AppendResult::Empty => 0,
+        AppendResult::SlowPath { .. } | AppendResult::Empty => 0,
     }
 }
 
@@ -478,7 +476,8 @@ pub unsafe extern "C" fn flywheel_stream_scroll_down(stream: *mut FlywheelStream
 
 /// Create an RGB color from components.
 #[unsafe(no_mangle)]
-pub extern "C" fn flywheel_rgb(r: u8, g: u8, b: u8) -> u32 {
+#[allow(clippy::cast_lossless)]
+pub const extern "C" fn flywheel_rgb(r: u8, g: u8, b: u8) -> u32 {
     ((r as u32) << 16) | ((g as u32) << 8) | (b as u32)
 }
 
@@ -497,9 +496,9 @@ pub extern "C" fn flywheel_version() -> *const c_char {
 // Helper Functions
 // =============================================================================
 
-fn convert_key_code(code: &KeyCode) -> (u32, c_int) {
+const fn convert_key_code(code: KeyCode) -> (u32, c_int) {
     match code {
-        KeyCode::Char(c) => (*c as u32, FLYWHEEL_KEY_NONE),
+        KeyCode::Char(c) => (c as u32, FLYWHEEL_KEY_NONE),
         KeyCode::Enter => (0, FLYWHEEL_KEY_ENTER),
         KeyCode::Esc => (0, FLYWHEEL_KEY_ESCAPE),
         KeyCode::Backspace => (0, FLYWHEEL_KEY_BACKSPACE),
@@ -517,7 +516,7 @@ fn convert_key_code(code: &KeyCode) -> (u32, c_int) {
     }
 }
 
-fn convert_modifiers(mods: &crate::actor::KeyModifiers) -> c_uint {
+const fn convert_modifiers(mods: crate::actor::KeyModifiers) -> c_uint {
     let mut result = 0;
     if mods.shift {
         result |= FLYWHEEL_MOD_SHIFT;

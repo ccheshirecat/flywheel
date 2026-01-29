@@ -3,10 +3,11 @@
 //! These enums define the protocol between actors in the system.
 
 use std::time::Instant;
+use crate::buffer::Buffer;
 
 /// Key codes for keyboard input.
 ///
-/// This is a simplified subset of crossterm's KeyCode, designed
+/// This is a simplified subset of crossterm's `KeyCode`, designed
 /// for the needs of agentic CLIs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum KeyCode {
@@ -50,6 +51,7 @@ pub enum KeyCode {
 
 /// Key modifiers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct KeyModifiers {
     /// Shift key held.
     pub shift: bool,
@@ -71,7 +73,7 @@ impl KeyModifiers {
     };
 
     /// Check if any modifier is active.
-    pub fn any(&self) -> bool {
+    pub const fn any(&self) -> bool {
         self.shift || self.control || self.alt || self.super_key
     }
 }
@@ -159,11 +161,12 @@ pub enum InputEvent {
 /// Commands sent to the render thread.
 #[derive(Debug)]
 pub enum RenderCommand {
-    /// Request a full redraw.
-    FullRedraw,
+    /// Request a full redraw with new buffer content.
+    FullRedraw(Box<Buffer>),
 
     /// Request a diff-based update.
-    Update,
+    /// Request a diff-based update with new buffer content.
+    Update(Box<Buffer>),
 
     /// Resize the buffers.
     Resize {
@@ -179,6 +182,18 @@ pub enum RenderCommand {
         x: Option<u16>,
         /// Y position.
         y: u16,
+    },
+
+    /// Write raw bytes directly to the terminal output.
+    ///
+    /// This is used for the "Fast Path" optimization: directly writing generated
+    /// ANSI sequences without going through the diffing engine.
+    ///
+    /// **Warning**: The caller is responsible for ensuring these bytes do not
+    /// corrupt the terminal state or contradict the buffer state.
+    RawOutput {
+        /// The raw bytes to write.
+        bytes: Vec<u8>,
     },
 
     /// Shutdown the render thread.
@@ -231,6 +246,7 @@ pub enum AgentEvent {
 
 /// Frame timing information.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct FrameInfo {
     /// Frame number since engine start.
     pub frame_number: u64,

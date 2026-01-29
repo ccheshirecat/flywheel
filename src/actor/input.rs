@@ -31,6 +31,7 @@ impl InputActor {
     /// # Returns
     ///
     /// The input actor handle.
+    #[allow(clippy::missing_panics_doc)]
     pub fn spawn(sender: Sender<InputEvent>, poll_timeout: Duration) -> Self {
         let shutdown = Arc::new(AtomicBool::new(false));
         let shutdown_clone = shutdown.clone();
@@ -38,7 +39,7 @@ impl InputActor {
         let handle = thread::Builder::new()
             .name("flywheel-input".to_string())
             .spawn(move || {
-                Self::run_loop(sender, shutdown_clone, poll_timeout);
+                Self::run_loop(&sender, &shutdown_clone, poll_timeout);
             })
             .expect("Failed to spawn input thread");
 
@@ -62,7 +63,8 @@ impl InputActor {
     }
 
     /// Main input polling loop.
-    fn run_loop(sender: Sender<InputEvent>, shutdown: Arc<AtomicBool>, poll_timeout: Duration) {
+    #[allow(clippy::collapsible_if)]
+    fn run_loop(sender: &Sender<InputEvent>, shutdown: &Arc<AtomicBool>, poll_timeout: Duration) {
         loop {
             // Check for shutdown
             if shutdown.load(Ordering::Relaxed) {
@@ -98,7 +100,7 @@ impl InputActor {
         }
     }
 
-    /// Convert a crossterm event to our InputEvent.
+    /// Convert a crossterm event to our `InputEvent`.
     fn convert_event(event: Event) -> Option<InputEvent> {
         match event {
             Event::Key(key_event) => {
@@ -125,8 +127,8 @@ impl InputActor {
         }
     }
 
-    /// Convert crossterm KeyCode to our KeyCode.
-    fn convert_key_code(code: event::KeyCode) -> Option<KeyCode> {
+    /// Convert crossterm `KeyCode` to our `KeyCode`.
+    const fn convert_key_code(code: event::KeyCode) -> Option<KeyCode> {
         Some(match code {
             event::KeyCode::Char(c) => KeyCode::Char(c),
             event::KeyCode::F(n) => KeyCode::F(n),
@@ -150,8 +152,8 @@ impl InputActor {
         })
     }
 
-    /// Convert crossterm KeyModifiers to our KeyModifiers.
-    fn convert_modifiers(mods: event::KeyModifiers) -> KeyModifiers {
+    /// Convert crossterm `KeyModifiers` to our `KeyModifiers`.
+    const fn convert_modifiers(mods: event::KeyModifiers) -> KeyModifiers {
         KeyModifiers {
             shift: mods.contains(event::KeyModifiers::SHIFT),
             control: mods.contains(event::KeyModifiers::CONTROL),
@@ -160,13 +162,13 @@ impl InputActor {
         }
     }
 
-    /// Convert crossterm MouseEvent to our InputEvent.
-    fn convert_mouse_event(mouse: event::MouseEvent) -> Option<InputEvent> {
+    /// Convert crossterm `MouseEvent` to our `InputEvent`.
+    const fn convert_mouse_event(mouse: event::MouseEvent) -> Option<InputEvent> {
         let modifiers = Self::convert_modifiers(mouse.modifiers);
 
         match mouse.kind {
             event::MouseEventKind::Down(button) => {
-                let button = Self::convert_mouse_button(button)?;
+                let button = Self::convert_mouse_button(button);
                 Some(InputEvent::MouseDown(MouseEvent {
                     x: mouse.column,
                     y: mouse.row,
@@ -175,7 +177,7 @@ impl InputActor {
                 }))
             }
             event::MouseEventKind::Up(button) => {
-                let button = Self::convert_mouse_button(button)?;
+                let button = Self::convert_mouse_button(button);
                 Some(InputEvent::MouseUp(MouseEvent {
                     x: mouse.column,
                     y: mouse.row,
@@ -190,7 +192,7 @@ impl InputActor {
                 modifiers,
             })),
             event::MouseEventKind::Drag(button) => {
-                let button = Self::convert_mouse_button(button)?;
+                let button = Self::convert_mouse_button(button);
                 Some(InputEvent::MouseMove(MouseEvent {
                     x: mouse.column,
                     y: mouse.row,
@@ -212,13 +214,13 @@ impl InputActor {
         }
     }
 
-    /// Convert crossterm MouseButton to our MouseButton.
-    fn convert_mouse_button(button: event::MouseButton) -> Option<MouseButton> {
-        Some(match button {
+    /// Convert crossterm `MouseButton` to our `MouseButton`.
+    const fn convert_mouse_button(button: event::MouseButton) -> MouseButton {
+        match button {
             event::MouseButton::Left => MouseButton::Left,
             event::MouseButton::Right => MouseButton::Right,
             event::MouseButton::Middle => MouseButton::Middle,
-        })
+        }
     }
 }
 

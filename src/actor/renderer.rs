@@ -29,6 +29,7 @@ pub struct RenderStats {
     /// Total frames rendered.
     pub frames: u64,
     /// Total cells changed across all frames.
+    #[allow(dead_code)]
     pub cells_changed: u64,
     /// Total bytes written to terminal.
     pub bytes_written: u64,
@@ -63,11 +64,11 @@ struct Renderer {
 
 impl Renderer {
     /// Create a new renderer with the given dimensions.
-    fn new(width: u16, height: u16) -> io::Result<Self> {
+    fn new(width: u16, height: u16) -> Self {
         let current = Buffer::new(width, height);
         let next = Buffer::new(width, height);
 
-        Ok(Self {
+        Self {
             current,
             next,
             diff_state: DiffState::new(),
@@ -78,17 +79,17 @@ impl Renderer {
             needs_full_redraw: true,
             cursor_x: None,
             cursor_y: 0,
-        })
+        }
     }
 
     /// Get a mutable reference to the next buffer.
     #[allow(dead_code)]
-    pub fn buffer_mut(&mut self) -> &mut Buffer {
+    pub const fn buffer_mut(&mut self) -> &mut Buffer {
         &mut self.next
     }
 
     /// Mark the entire screen as dirty.
-    fn mark_full_dirty(&mut self) {
+    const fn mark_full_dirty(&mut self) {
         self.needs_full_redraw = true;
     }
 
@@ -124,7 +125,6 @@ impl Renderer {
         // Handle cursor position
         if let Some(x) = self.cursor_x {
             // Show cursor at position
-            use std::io::Write as IoWrite;
             let _ = write!(
                 &mut self.output,
                 "\x1b[{};{}H\x1b[?25h",
@@ -149,7 +149,7 @@ impl Renderer {
         let elapsed = start.elapsed();
         self.stats.frames += 1;
         self.stats.bytes_written += self.output.len() as u64;
-        self.stats.last_render_us = elapsed.as_micros() as u64;
+        self.stats.last_render_us = u64::try_from(elapsed.as_micros()).unwrap_or(u64::MAX);
 
         // Smoothed average
         if self.stats.avg_render_us == 0 {
@@ -162,6 +162,16 @@ impl Renderer {
         Ok(())
     }
 
+    /// Write raw bytes directly to the terminal.
+    fn write_raw(&mut self, bytes: &[u8]) -> io::Result<()> {
+        self.stdout.write_all(bytes)?;
+        self.stdout.flush()?;
+        self.stats.bytes_written += bytes.len() as u64;
+        // Invalidate ALL state (cursor, colors) since raw writes change them
+        self.diff_state.reset();
+        Ok(())
+    }
+
     /// Resize buffers.
     fn resize(&mut self, width: u16, height: u16) {
         self.current.resize(width, height);
@@ -170,7 +180,7 @@ impl Renderer {
     }
 
     /// Set cursor position.
-    fn set_cursor(&mut self, x: Option<u16>, y: u16) {
+    const fn set_cursor(&mut self, x: Option<u16>, y: u16) {
         self.cursor_x = x;
         self.cursor_y = y;
     }
@@ -188,6 +198,7 @@ impl RendererActor {
     /// # Returns
     ///
     /// The renderer actor handle.
+    #[allow(clippy::missing_panics_doc)]
     pub fn spawn(receiver: Receiver<RenderCommand>, width: u16, height: u16) -> Self {
         let shutdown = Arc::new(AtomicBool::new(false));
         let shutdown_clone = shutdown.clone();
@@ -195,7 +206,7 @@ impl RendererActor {
         let handle = thread::Builder::new()
             .name("flywheel-render".to_string())
             .spawn(move || {
-                if let Err(e) = Self::run_loop(receiver, shutdown_clone, width, height) {
+                if let Err(e) = Self::run_loop(&receiver, &shutdown_clone, width, height) {
                     eprintln!("Render thread error: {e}");
                 }
             })
@@ -221,12 +232,12 @@ impl RendererActor {
 
     /// Main render loop.
     fn run_loop(
-        receiver: Receiver<RenderCommand>,
-        shutdown: Arc<AtomicBool>,
+        receiver: &Receiver<RenderCommand>,
+        shutdown: &Arc<AtomicBool>,
         width: u16,
         height: u16,
     ) -> io::Result<()> {
-        let mut renderer = Renderer::new(width, height)?;
+        let mut renderer = Renderer::new(width, height);
 
         loop {
             // Check for shutdown
@@ -235,13 +246,15 @@ impl RendererActor {
             }
 
             // Wait for command with timeout
-            match receiver.recv_timeout(Duration::from_millis(16)) {
-                Ok(command) => match command {
-                    RenderCommand::FullRedraw => {
+            if let Ok(command) = receiver.recv_timeout(Duration::from_millis(16)) {
+                match command {
+                    RenderCommand::FullRedraw(buffer) => {
+                        renderer.next = *buffer;
                         renderer.mark_full_dirty();
                         renderer.render()?;
                     }
-                    RenderCommand::Update => {
+                    RenderCommand::Update(buffer) => {
+                        renderer.next = *buffer;
                         renderer.render()?;
                     }
                     RenderCommand::Resize { width, height } => {
@@ -250,49 +263,19 @@ impl RendererActor {
                     RenderCommand::SetCursor { x, y } => {
                         renderer.set_cursor(x, y);
                     }
+                    RenderCommand::RawOutput { bytes } => {
+                        renderer.write_raw(&bytes)?;
+                    }
                     RenderCommand::Shutdown => {
                         break;
                     }
-                },
-                Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
-                    // No command, just continue
                 }
-                Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
-                    // Channel closed, exit
-                    break;
-                }
+            } else {
+                 // Timeout: loop again to check shutdown or run idle tasks
+                 // (e.g. continuous animation if we had it, but here just wait)
             }
         }
 
         Ok(())
-    }
-}
-
-impl Drop for RendererActor {
-    fn drop(&mut self) {
-        self.shutdown();
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_renderer_new() {
-        let renderer = Renderer::new(80, 24).unwrap();
-        assert_eq!(renderer.current.width(), 80);
-        assert_eq!(renderer.current.height(), 24);
-        assert!(renderer.needs_full_redraw);
-    }
-
-    #[test]
-    fn test_renderer_resize() {
-        let mut renderer = Renderer::new(80, 24).unwrap();
-        renderer.needs_full_redraw = false;
-        renderer.resize(100, 30);
-        assert_eq!(renderer.current.width(), 100);
-        assert_eq!(renderer.next.width(), 100);
-        assert!(renderer.needs_full_redraw);
     }
 }

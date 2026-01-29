@@ -70,7 +70,8 @@ impl Rect {
 
     /// Shrink the rectangle by a margin on all sides.
     #[inline]
-    pub fn shrink(&self, margin: u16) -> Self {
+    #[must_use]
+    pub const fn shrink(&self, margin: u16) -> Self {
         let m2 = margin * 2;
         if self.width <= m2 || self.height <= m2 {
             return Self::ZERO;

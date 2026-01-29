@@ -38,7 +38,7 @@ impl Default for DiffState {
 
 impl DiffState {
     /// Create a new diff state with unknown terminal state.
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             cursor_x: 0,
             cursor_y: 0,
@@ -49,10 +49,13 @@ impl DiffState {
     }
 
     /// Reset the state (e.g., after a full screen clear).
-    pub fn reset(&mut self) {
+    pub const fn reset(&mut self) {
         self.fg = None;
         self.bg = None;
         self.modifiers = None;
+        // Force cursor move on next write
+        self.cursor_x = u16::MAX;
+        self.cursor_y = u16::MAX;
     }
 }
 
@@ -115,7 +118,7 @@ pub fn render_diff(
     };
 
     for rect in rects {
-        diff_rect(current, next, rect, output, state, &mut result);
+        diff_rect(current, next, *rect, output, state, &mut result);
     }
 
     result
@@ -125,7 +128,7 @@ pub fn render_diff(
 fn diff_rect(
     current: &Buffer,
     next: &Buffer,
-    rect: &Rect,
+    rect: Rect,
     output: &mut Vec<u8>,
     state: &mut DiffState,
     result: &mut DiffResult,
@@ -162,6 +165,20 @@ fn diff_rect(
                 result.cursor_moves += 1;
             }
 
+            // Handle modifier resets first
+            // If we need to disable any modifiers, we must emit a full reset (\x1b[0m)
+            // which also clears colors.
+            let next_mods = next_cell.modifiers();
+            let current_mods = state.modifiers.unwrap_or(Modifiers::empty());
+            let removed_mods = current_mods.difference(next_mods);
+
+            if !removed_mods.is_empty() {
+                output.extend_from_slice(b"\x1b[0m");
+                state.fg = None;
+                state.bg = None;
+                state.modifiers = None;
+            }
+
             // Emit color changes if needed
             if state.fg != Some(next_cell.fg()) {
                 emit_fg_color(output, next_cell.fg());
@@ -175,10 +192,12 @@ fn diff_rect(
                 result.color_changes += 1;
             }
 
-            // Emit modifier changes if needed
-            if state.modifiers != Some(next_cell.modifiers()) {
-                emit_modifiers(output, next_cell.modifiers(), state.modifiers);
-                state.modifiers = Some(next_cell.modifiers());
+            // Emit modifier additions if needed
+            if state.modifiers != Some(next_mods) {
+                // Logic here only handles additions because we already handled removals
+                // (if any removal occurred, we reset state.modifiers to None)
+                emit_modifiers(output, next_mods, state.modifiers);
+                state.modifiers = Some(next_mods);
                 result.modifier_changes += 1;
             }
 
@@ -186,7 +205,7 @@ fn diff_rect(
             emit_grapheme(output, next_cell, next);
 
             // Update cursor position (advances by display width)
-            let advance = next_cell.display_width().max(1) as u16;
+            let advance = u16::from(next_cell.display_width().max(1));
             state.cursor_x += advance;
         }
     }
@@ -207,9 +226,9 @@ fn emit_cursor_move(output: &mut Vec<u8>, x: u16, y: u16) {
         output.extend_from_slice(b"\x1b[H");
     } else if col == 1 {
         // Move to column 1 of row N
-        let _ = write!(output, "\x1b[{}H", row);
+        let _ = write!(output, "\x1b[{row}H");
     } else {
-        let _ = write!(output, "\x1b[{};{}H", row, col);
+        let _ = write!(output, "\x1b[{row};{col}H");
     }
 }
 
@@ -234,16 +253,16 @@ fn emit_modifiers(output: &mut Vec<u8>, new: Modifiers, old: Option<Modifiers>) 
 
     // If we're removing modifiers, we need to reset first
     let removed = old.difference(new);
-    if !removed.is_empty() {
+    if removed.is_empty() {
+        // Only adding modifiers, no need to reset
+        let added = new.difference(old);
+        emit_modifier_set(output, added);
+    } else {
         // Reset all attributes, then re-apply what we want
         output.extend_from_slice(b"\x1b[0m");
         // Note: After reset, colors are also reset, so caller should
         // re-emit colors. For now, we emit all new modifiers.
         emit_modifier_set(output, new);
-    } else {
-        // Only adding modifiers, no need to reset
-        let added = new.difference(old);
-        emit_modifier_set(output, added);
     }
 }
 
@@ -280,12 +299,11 @@ fn emit_modifier_set(output: &mut Vec<u8>, modifiers: Modifiers) {
 fn emit_grapheme(output: &mut Vec<u8>, cell: &Cell, buffer: &Buffer) {
     if cell.flags().contains(CellFlags::OVERFLOW) {
         // Look up in overflow storage
-        if let Some(idx) = cell.overflow_index() {
-            if let Some(grapheme) = buffer.get_overflow(idx) {
+        if let Some(idx) = cell.overflow_index()
+            && let Some(grapheme) = buffer.get_overflow(idx) {
                 output.extend_from_slice(grapheme.as_bytes());
                 return;
             }
-        }
         // Fallback: emit a replacement character
         output.extend_from_slice("�".as_bytes());
     } else if let Some(grapheme) = cell.grapheme() {

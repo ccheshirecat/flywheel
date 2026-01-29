@@ -28,7 +28,7 @@ pub struct Region {
 
 impl Region {
     /// Create a new region.
-    pub fn new(id: RegionId, rect: Rect) -> Self {
+    pub const fn new(id: RegionId, rect: Rect) -> Self {
         Self {
             id,
             rect,
@@ -38,13 +38,14 @@ impl Region {
     }
 
     /// Set the z-index.
-    pub fn with_z_index(mut self, z: u8) -> Self {
+    #[must_use]
+    pub const fn with_z_index(mut self, z: u8) -> Self {
         self.z_index = z;
         self
     }
 
     /// Mark the region as dirty.
-    pub fn mark_dirty(&mut self) {
+    pub const fn mark_dirty(&mut self) {
         self.dirty_generation += 1;
     }
 }
@@ -62,7 +63,7 @@ pub struct Layout {
 
 impl Layout {
     /// Create a new layout for the given terminal size.
-    pub fn new(width: u16, height: u16) -> Self {
+    pub const fn new(width: u16, height: u16) -> Self {
         Self {
             regions: Vec::new(),
             terminal_size: (width, height),
@@ -98,7 +99,7 @@ impl Layout {
     }
 
     /// Resize the layout and recompute regions.
-    pub fn resize(&mut self, width: u16, height: u16) {
+    pub const fn resize(&mut self, width: u16, height: u16) {
         self.terminal_size = (width, height);
         self.generation += 1;
         // Subclasses should override to recompute region positions

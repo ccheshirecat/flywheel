@@ -29,6 +29,7 @@
 #![warn(clippy::nursery)]
 #![allow(clippy::module_name_repetitions)]
 #![allow(clippy::must_use_candidate)]
+#![allow(clippy::similar_names)]
 
 pub mod buffer;
 pub mod layout;

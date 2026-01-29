@@ -8,6 +8,7 @@
 //! - [`diff`]: Diffing engine for generating minimal ANSI sequences
 
 mod cell;
+#[allow(clippy::module_inception)]
 mod buffer;
 pub mod diff;
 

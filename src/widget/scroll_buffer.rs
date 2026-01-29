@@ -4,26 +4,27 @@
 //! off the visible area, with O(1) append and scroll operations.
 
 use std::collections::VecDeque;
+use crate::buffer::Cell;
 
 /// A line of text with associated style information.
 #[derive(Debug, Clone)]
 pub struct StyledLine {
     /// The text content of the line.
-    pub content: String,
+    pub content: Vec<Cell>,
     /// Whether this line was soft-wrapped (vs. hard newline).
     pub wrapped: bool,
 }
 
 impl StyledLine {
     /// Create a new styled line.
-    pub fn new(content: String, wrapped: bool) -> Self {
+    pub const fn new(content: Vec<Cell>, wrapped: bool) -> Self {
         Self { content, wrapped }
     }
 
     /// Create an empty line.
-    pub fn empty() -> Self {
+    pub const fn empty() -> Self {
         Self {
-            content: String::new(),
+            content: Vec::new(),
             wrapped: false,
         }
     }
@@ -67,18 +68,26 @@ impl ScrollBuffer {
     }
 
     /// Get the current line (the line being appended to).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the buffer is empty (which should never happen).
     pub fn current_line(&self) -> &StyledLine {
         self.lines.back().expect("Buffer should never be empty")
     }
 
     /// Get a mutable reference to the current line.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the buffer is empty (which should never happen).
     pub fn current_line_mut(&mut self) -> &mut StyledLine {
         self.lines.back_mut().expect("Buffer should never be empty")
     }
 
-    /// Append text to the current line.
-    pub fn append(&mut self, text: &str) {
-        self.current_line_mut().content.push_str(text);
+    /// Append cells to the current line.
+    pub fn append(&mut self, cells: impl IntoIterator<Item = Cell>) {
+        self.current_line_mut().content.extend(cells);
     }
 
     /// Start a new line.
@@ -92,7 +101,7 @@ impl ScrollBuffer {
             self.lines.pop_front();
         }
 
-        self.lines.push_back(StyledLine::new(String::new(), wrapped));
+        self.lines.push_back(StyledLine::new(Vec::new(), wrapped));
     }
 
     /// Get a line by index from the top of the buffer.
@@ -119,17 +128,17 @@ impl ScrollBuffer {
     }
 
     /// Scroll down by the given number of lines.
-    pub fn scroll_down(&mut self, lines: usize) {
+    pub const fn scroll_down(&mut self, lines: usize) {
         self.scroll_offset = self.scroll_offset.saturating_sub(lines);
     }
 
     /// Scroll to the bottom (latest content).
-    pub fn scroll_to_bottom(&mut self) {
+    pub const fn scroll_to_bottom(&mut self) {
         self.scroll_offset = 0;
     }
 
     /// Check if we're scrolled to the bottom.
-    pub fn at_bottom(&self) -> bool {
+    pub const fn at_bottom(&self) -> bool {
         self.scroll_offset == 0
     }
 
@@ -142,13 +151,17 @@ impl ScrollBuffer {
 
     /// Get the length of the current line in characters.
     pub fn current_line_len(&self) -> usize {
-        self.current_line().content.chars().count()
+        self.current_line().content.len()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn text_to_cells(text: &str) -> Vec<Cell> {
+        text.chars().map(Cell::from_char).collect()
+    }
 
     #[test]
     fn test_scroll_buffer_new() {
@@ -160,43 +173,49 @@ mod tests {
     #[test]
     fn test_scroll_buffer_append() {
         let mut buf = ScrollBuffer::new(100);
-        buf.append("Hello");
-        buf.append(", world!");
-        assert_eq!(buf.current_line().content, "Hello, world!");
+        buf.append(text_to_cells("Hello"));
+        buf.append(text_to_cells(", world!"));
+        
+        let content: String = buf.current_line().content.iter()
+            .map(|c| c.grapheme().unwrap_or(""))
+            .collect();
+        assert_eq!(content, "Hello, world!");
     }
 
     #[test]
     fn test_scroll_buffer_newline() {
         let mut buf = ScrollBuffer::new(100);
-        buf.append("Line 1");
+        buf.append(text_to_cells("Line 1"));
         buf.newline(false);
-        buf.append("Line 2");
+        buf.append(text_to_cells("Line 2"));
         assert_eq!(buf.len(), 2);
-        assert_eq!(buf.get(0).unwrap().content, "Line 1");
-        assert_eq!(buf.get(1).unwrap().content, "Line 2");
+        
+        let l1: String = buf.get(0).unwrap().content.iter().map(|c| c.grapheme().unwrap_or("")).collect();
+        assert_eq!(l1, "Line 1");
     }
 
     #[test]
     fn test_scroll_buffer_capacity() {
         let mut buf = ScrollBuffer::new(3);
-        buf.append("Line 1");
+        buf.append(text_to_cells("Line 1"));
         buf.newline(false);
-        buf.append("Line 2");
+        buf.append(text_to_cells("Line 2"));
         buf.newline(false);
-        buf.append("Line 3");
+        buf.append(text_to_cells("Line 3"));
         buf.newline(false);
-        buf.append("Line 4");
+        buf.append(text_to_cells("Line 4"));
 
         assert_eq!(buf.len(), 3);
         // Line 1 should have been discarded
-        assert_eq!(buf.get(0).unwrap().content, "Line 2");
+        let l0: String = buf.get(0).unwrap().content.iter().map(|c| c.grapheme().unwrap_or("")).collect();
+        assert_eq!(l0, "Line 2");
     }
 
     #[test]
     fn test_scroll_buffer_scroll() {
         let mut buf = ScrollBuffer::new(100);
         for i in 0..10 {
-            buf.append(&format!("Line {i}"));
+            buf.append(text_to_cells(&format!("Line {i}")));
             buf.newline(false);
         }
 

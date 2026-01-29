@@ -108,7 +108,7 @@ impl StreamWidget {
     }
 
     /// Get the widget bounds.
-    pub fn bounds(&self) -> Rect {
+    pub const fn bounds(&self) -> Rect {
         self.bounds
     }
 
@@ -121,17 +121,17 @@ impl StreamWidget {
     }
 
     /// Set the foreground color for subsequent text.
-    pub fn set_fg(&mut self, fg: Rgb) {
+    pub const fn set_fg(&mut self, fg: Rgb) {
         self.current_fg = fg;
     }
 
     /// Set the background color for subsequent text.
-    pub fn set_bg(&mut self, bg: Rgb) {
+    pub const fn set_bg(&mut self, bg: Rgb) {
         self.current_bg = bg;
     }
 
     /// Reset colors to defaults.
-    pub fn reset_colors(&mut self) {
+    pub const fn reset_colors(&mut self) {
         self.current_fg = self.config.default_fg;
         self.current_bg = self.config.default_bg;
     }
@@ -171,12 +171,20 @@ impl StreamWidget {
         let mut char_count = 0;
 
         // Append to content buffer
-        self.content.append(text);
+        let cells = text.graphemes(true).filter_map(|g| {
+             Cell::from_grapheme(g).map(|mut c| {
+                 c.set_fg(self.current_fg);
+                 c.set_bg(self.current_bg);
+                 c
+             })
+        });
+        self.content.append(cells);
 
         // Update cursor position
         for grapheme in text.graphemes(true) {
             let width = UnicodeWidthStr::width(grapheme);
-            self.cursor_col += width as u16;
+            // safe cast: can_fast_path ensures it fits in width
+            self.cursor_col += u16::try_from(width).unwrap_or(0);
             char_count += 1;
         }
 
@@ -194,26 +202,34 @@ impl StreamWidget {
     fn append_slow_path(&mut self, text: &str) -> AppendResult {
         let initial_row = self.cursor_row;
         let mut max_row = self.cursor_row;
-        let min_col = self.cursor_col;
+        let initial_col = self.cursor_col;
+        let mut min_touched_col = self.cursor_col;
         let mut max_col = self.cursor_col;
 
         for ch in text.chars() {
             match ch {
                 '\n' => {
                     // Hard newline
+                    let was_at_bottom = self.content.at_bottom();
                     self.content.newline(false);
+                    if !was_at_bottom {
+                        self.content.scroll_up(1);
+                    }
+                    
                     max_col = max_col.max(self.cursor_col);
                     self.cursor_col = 0;
+                    min_touched_col = 0; // Newline starts at 0
                     self.cursor_row += 1;
 
                     // Check for scroll
                     if self.cursor_row >= self.bounds.height {
-                        self.handle_scroll();
+                        self.handle_scroll(was_at_bottom);
                     }
                 }
                 '\r' => {
                     // Carriage return
                     self.cursor_col = 0;
+                    min_touched_col = 0;
                 }
                 '\t' => {
                     // Tab - expand to spaces
@@ -229,34 +245,47 @@ impl StreamWidget {
 
             max_row = max_row.max(self.cursor_row);
             max_col = max_col.max(self.cursor_col);
+            
+            // If wrap happened in append_char, min_touched_col should be updated in a real implementation
+            if self.cursor_col < initial_col && self.cursor_row > initial_row {
+                 min_touched_col = 0;
+            }
         }
 
         // Calculate dirty rect
         let dirty_rect = Rect {
-            x: self.bounds.x + min_col.min(0),
+            x: self.bounds.x + min_touched_col,
             y: self.bounds.y + initial_row,
             width: self.bounds.width,
             height: (max_row - initial_row + 1).max(1),
         };
 
-        self.dirty_rects.push(dirty_rect);
+        if !self.needs_full_redraw {
+             self.dirty_rects.push(dirty_rect);
+        }
 
         AppendResult::SlowPath { dirty_rect }
     }
 
     /// Append a single character, handling wrapping.
+    #[allow(clippy::cast_possible_truncation)]
     fn append_char(&mut self, ch: char) {
         let char_width = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0) as u16;
 
         // Check for wrap
         if self.cursor_col + char_width > self.bounds.width {
             if self.config.word_wrap {
+                let was_at_bottom = self.content.at_bottom();
                 self.content.newline(true);
+                if !was_at_bottom {
+                    self.content.scroll_up(1);
+                }
+                
                 self.cursor_col = 0;
                 self.cursor_row += 1;
 
                 if self.cursor_row >= self.bounds.height {
-                    self.handle_scroll();
+                    self.handle_scroll(was_at_bottom);
                 }
             } else {
                 // No wrap - just don't add the character
@@ -265,17 +294,22 @@ impl StreamWidget {
         }
 
         // Add character to content
-        self.content.append(&ch.to_string());
+        let mut cell = Cell::from_char(ch);
+        cell.set_fg(self.current_fg);
+        cell.set_bg(self.current_bg);
+        
+        self.content.append(std::iter::once(cell));
         self.cursor_col += char_width;
     }
 
     /// Handle scrolling when cursor goes past bottom.
-    fn handle_scroll(&mut self) {
+    const fn handle_scroll(&mut self, was_at_bottom: bool) {
         // Keep cursor at bottom row
         self.cursor_row = self.bounds.height - 1;
 
-        // If auto-scroll is on, stay at bottom
-        if self.config.auto_scroll {
+        // If we were at bottom and auto-scrolling is on, stick to bottom.
+        // Otherwise, stay detached (sticky scroll).
+        if self.config.auto_scroll && was_at_bottom {
             self.content.scroll_to_bottom();
         }
 
@@ -302,6 +336,7 @@ impl StreamWidget {
     /// Render the widget to a buffer.
     ///
     /// This renders the visible content to the given buffer.
+    #[allow(clippy::cast_possible_truncation)]
     pub fn render(&mut self, buffer: &mut Buffer) {
         let viewport_height = self.bounds.height as usize;
 
@@ -316,14 +351,17 @@ impl StreamWidget {
             }
 
             let mut col = 0u16;
-            for grapheme in line.content.graphemes(true) {
+            for cell in &line.content {
                 if col >= self.bounds.width {
                     break;
                 }
 
                 let x = self.bounds.x + col;
-                let width = buffer.set_grapheme(x, y, grapheme, self.current_fg, self.current_bg);
-                col += width as u16;
+                // buffer.set(x, y, *cell); // Direct set since cell has grapheme and style
+                // But wait, buffer.set takes x, y, Cell.
+                buffer.set(x, y, *cell); 
+                
+                col += u16::from(cell.display_width());
             }
 
             // Clear rest of line
@@ -362,7 +400,7 @@ impl StreamWidget {
             let abs_x = self.bounds.x + start_col + 1; // 1-indexed
             let abs_y = self.bounds.y + row + 1; // 1-indexed
 
-            let _ = write!(output, "\x1b[{};{}H", abs_y, abs_x);
+            let _ = write!(output, "\x1b[{abs_y};{abs_x}H");
 
             // Set colors
             let _ = write!(
@@ -377,8 +415,23 @@ impl StreamWidget {
         }
     }
 
+    /// Append text and perform fast-path generation if possible.
+    ///
+    /// If the text was successfully appended via fast path (no wrap, no scroll),
+    /// the ANSI sequence is written to `output` and `true` is returned.
+    /// Otherwise returns `false` (caller should rely on standard cycle).
+    pub fn append_fast_into(&mut self, text: &str, output: &mut Vec<u8>) -> bool {
+        let result = self.append(text);
+        if let AppendResult::FastPath { .. } = result {
+            self.write_fast_path(result, text, output);
+            true
+        } else {
+            false
+        }
+    }
+
     /// Check if a full redraw is needed.
-    pub fn needs_redraw(&self) -> bool {
+    pub const fn needs_redraw(&self) -> bool {
         self.needs_full_redraw || !self.dirty_rects.is_empty()
     }
 
@@ -388,7 +441,7 @@ impl StreamWidget {
     }
 
     /// Mark the widget for full redraw.
-    pub fn invalidate(&mut self) {
+    pub const fn invalidate(&mut self) {
         self.needs_full_redraw = true;
     }
 
@@ -407,13 +460,13 @@ impl StreamWidget {
     }
 
     /// Scroll down by the given number of lines.
-    pub fn scroll_down(&mut self, lines: usize) {
+    pub const fn scroll_down(&mut self, lines: usize) {
         self.content.scroll_down(lines);
         self.needs_full_redraw = true;
     }
 
     /// Get the current cursor position within the widget.
-    pub fn cursor_position(&self) -> (u16, u16) {
+    pub const fn cursor_position(&self) -> (u16, u16) {
         (self.cursor_col, self.cursor_row)
     }
 

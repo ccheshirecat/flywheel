@@ -1,4 +1,4 @@
-//! OutputBuffer: Single-syscall output buffer for ANSI sequences.
+//! `OutputBuffer`: Single-syscall output buffer for ANSI sequences.
 
 use crate::buffer::Rgb;
 use std::io::Write;
@@ -38,13 +38,13 @@ impl OutputBuffer {
 
     /// Get the buffer length.
     #[inline]
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.data.len()
     }
 
     /// Check if buffer is empty.
     #[inline]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.data.is_empty()
     }
 
@@ -104,6 +104,10 @@ impl OutputBuffer {
     }
 
     /// Flush to a writer in a single syscall.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the underlying writer fails.
     pub fn flush_to<W: Write>(&self, writer: &mut W) -> std::io::Result<()> {
         writer.write_all(&self.data)?;
         writer.flush()

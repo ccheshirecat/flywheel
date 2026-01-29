@@ -5,7 +5,7 @@
 //! The `Cell` struct is carefully designed for cache efficiency:
 //! - 16 bytes total, allowing 4 cells per cache line (64 bytes)
 //! - Inline grapheme storage covers 99%+ of real-world characters
-//! - Complex graphemes (emoji ZWJ sequences) spill to an external HashMap
+//! - Complex graphemes (emoji ZWJ sequences) spill to an external `HashMap`
 //!
 //! ```text
 //! ┌───────────────────────────────────────────────────────────────────────────┐
@@ -238,11 +238,12 @@ impl Cell {
     /// (which never happens for a single `char`, but may happen for
     /// grapheme clusters when using `from_grapheme`).
     #[inline]
+    #[allow(clippy::missing_panics_doc)]
     pub fn from_char(c: char) -> Self {
         let mut grapheme = [0u8; 4];
         let s = c.encode_utf8(&mut grapheme);
-        let len = s.len() as u8;
-        let width = unicode_width::UnicodeWidthChar::width(c).unwrap_or(0) as u8;
+        let len = u8::try_from(s.len()).unwrap();
+        let width = u8::try_from(unicode_width::UnicodeWidthChar::width(c).unwrap_or(0)).unwrap();
 
         Self {
             grapheme,
@@ -261,6 +262,7 @@ impl Cell {
     /// If the grapheme fits in 4 bytes, it's stored inline.
     /// Otherwise, returns `None` and the caller should use overflow storage.
     #[inline]
+    #[allow(clippy::missing_panics_doc)]
     pub fn from_grapheme(s: &str) -> Option<Self> {
         let bytes = s.as_bytes();
         if bytes.len() > 4 {
@@ -270,11 +272,11 @@ impl Cell {
 
         let mut grapheme = [0u8; 4];
         grapheme[..bytes.len()].copy_from_slice(bytes);
-        let width = unicode_width::UnicodeWidthStr::width(s) as u8;
+        let width = u8::try_from(unicode_width::UnicodeWidthStr::width(s)).unwrap_or(1);
 
         Some(Self {
             grapheme,
-            grapheme_len: bytes.len() as u8,
+            grapheme_len: u8::try_from(bytes.len()).unwrap(),
             display_width: width,
             fg: Rgb::DEFAULT_FG,
             bg: Rgb::DEFAULT_BG,
@@ -288,7 +290,7 @@ impl Cell {
     ///
     /// The index is stored in the grapheme bytes as a little-endian u32.
     #[inline]
-    pub fn overflow(index: u32, display_width: u8) -> Self {
+    pub const fn overflow(index: u32, display_width: u8) -> Self {
         Self {
             grapheme: index.to_le_bytes(),
             grapheme_len: 0, // Indicates overflow
@@ -323,6 +325,7 @@ impl Cell {
     /// Returns `None` if this is an overflow cell (caller should check `is_overflow()`
     /// and look up the grapheme in the overflow storage).
     #[inline]
+    #[allow(unsafe_code)]
     pub fn grapheme(&self) -> Option<&str> {
         if self.flags.contains(CellFlags::OVERFLOW) {
             return None;
@@ -335,7 +338,7 @@ impl Cell {
 
     /// Get the overflow index if this is an overflow cell.
     #[inline]
-    pub fn overflow_index(&self) -> Option<u32> {
+    pub const fn overflow_index(&self) -> Option<u32> {
         if self.flags.contains(CellFlags::OVERFLOW) {
             Some(u32::from_le_bytes(self.grapheme))
         } else {
@@ -387,27 +390,28 @@ impl Cell {
 
     /// Set the foreground color.
     #[inline]
-    pub fn set_fg(&mut self, fg: Rgb) -> &mut Self {
+    pub const fn set_fg(&mut self, fg: Rgb) -> &mut Self {
         self.fg = fg;
         self
     }
 
     /// Set the background color.
     #[inline]
-    pub fn set_bg(&mut self, bg: Rgb) -> &mut Self {
+    pub const fn set_bg(&mut self, bg: Rgb) -> &mut Self {
         self.bg = bg;
         self
     }
 
     /// Set the modifiers.
     #[inline]
-    pub fn set_modifiers(&mut self, modifiers: Modifiers) -> &mut Self {
+    pub const fn set_modifiers(&mut self, modifiers: Modifiers) -> &mut Self {
         self.modifiers = modifiers;
         self
     }
 
     /// Set the foreground color (builder pattern).
     #[inline]
+    #[must_use]
     pub const fn with_fg(mut self, fg: Rgb) -> Self {
         self.fg = fg;
         self
@@ -415,6 +419,7 @@ impl Cell {
 
     /// Set the background color (builder pattern).
     #[inline]
+    #[must_use]
     pub const fn with_bg(mut self, bg: Rgb) -> Self {
         self.bg = bg;
         self
@@ -422,6 +427,7 @@ impl Cell {
 
     /// Set the modifiers (builder pattern).
     #[inline]
+    #[must_use]
     pub const fn with_modifiers(mut self, modifiers: Modifiers) -> Self {
         self.modifiers = modifiers;
         self
@@ -429,7 +435,7 @@ impl Cell {
 
     /// Reset the cell to empty (space with default colors).
     #[inline]
-    pub fn reset(&mut self) {
+    pub const fn reset(&mut self) {
         *self = Self::EMPTY;
     }
 }
@@ -478,7 +484,7 @@ impl std::fmt::Debug for Cell {
             .field("bg", &self.bg)
             .field("modifiers", &self.modifiers)
             .field("flags", &self.flags)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
