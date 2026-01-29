@@ -50,6 +50,16 @@ impl Rgb {
     pub const DEFAULT_FG: Self = Self::WHITE;
     /// Default background (black)
     pub const DEFAULT_BG: Self = Self::BLACK;
+
+    /// Create from a 24-bit hex color (e.g., 0xFF5500).
+    #[inline]
+    pub const fn from_u32(hex: u32) -> Self {
+        Self::new(
+            ((hex >> 16) & 0xFF) as u8,
+            ((hex >> 8) & 0xFF) as u8,
+            (hex & 0xFF) as u8,
+        )
+    }
 }
 
 impl std::fmt::Debug for Rgb {
