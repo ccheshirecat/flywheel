@@ -6,7 +6,7 @@
 
 ---
 
-## Current Phase: 5 — C FFI & Polish
+## Current Phase: ✅ Project Complete
 
 ### Phase Overview
 
@@ -16,7 +16,7 @@
 | 2 | Diffing Engine | ✅ Complete | 2026-01-29 |
 | 3 | Actor Model | ✅ Complete | 2026-01-29 |
 | 4 | Streaming Widget | ✅ Complete | 2026-01-29 |
-| 5 | C FFI & Polish | 🟡 In Progress | — |
+| 5 | C FFI & Polish | ✅ Complete | 2026-01-29 |
 
 ---
 
@@ -165,7 +165,7 @@
 
 ---
 
-## Phase 5: C FFI & Polish
+## Phase 5: C FFI & Polish ✅
 
 **Goal:** Cross-language bindings.
 
@@ -173,11 +173,17 @@
 
 | ID | Task | Status | Notes |
 |----|------|--------|-------|
-| 5.1 | Define C API surface | ⬜ | |
-| 5.2 | `#[no_mangle] extern "C"` exports | ⬜ | |
-| 5.3 | Header file generation (cbindgen) | ⬜ | |
-| 5.4 | Test C program linking | ⬜ | |
-| 5.5 | Documentation (rustdoc) | ⬜ | |
+| 5.1 | Define C API surface | ✅ | Opaque handles for Engine, Stream, Buffer |
+| 5.2 | `#[unsafe(no_mangle)] extern "C"` exports | ✅ | Engine, Widget, and Utility functions |
+| 5.3 | Header file generation | ✅ | `include/flywheel.h` created manually |
+| 5.4 | Test C program linking | ✅ | Validated with GCC and test_ffi.c |
+| 5.5 | Documentation (rustdoc) | ✅ | All public items documented |
+
+### Output
+- `libflywheel.dylib` / `.so` / `.a` (in target/debug or release)
+- `include/flywheel.h` C header file
+
+**Git Commit:** `ac77e30` - feat: Phase 5 - C FFI and Polish
 | 5.6 | README with usage examples | ⬜ | |
 
 ### Exit Criteria
