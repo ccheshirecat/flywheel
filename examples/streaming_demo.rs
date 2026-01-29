@@ -77,22 +77,15 @@ fn main() -> std::io::Result<()> {
     let mut height = engine.height();
 
     // Layout
-    let header_height = 2;
-    let footer_height = 1;
+    let header_height = 0u16;
+    let footer_height = 2u16;
+    let footer_bg = Rgb::new(30, 30, 30);
     let content_height = height.saturating_sub(header_height + footer_height);
 
     let mut stream = StreamWidget::new(Rect::new(0, header_height, width, content_height));
     
     // Initial colors
-    let header_bg = Rgb::new(20, 20, 20);
-    let footer_bg = Rgb::new(30, 30, 30);
 
-    // Draw header
-    for x in 0..width {
-        engine.set_cell(x, 0, Cell::new(' ').with_bg(header_bg));
-        engine.set_cell(x, 1, Cell::new('=').with_fg(Rgb::new(50, 50, 50)).with_bg(header_bg));
-    }
-    engine.draw_text(2, 0, "FLYWHEEL MATRIX STRESS TEST", Rgb::new(0, 255, 100), header_bg);
 
     engine.request_redraw();
 
@@ -110,18 +103,16 @@ fn main() -> std::io::Result<()> {
             .with_cpu(CpuRefreshKind::everything())
             .with_memory(MemoryRefreshKind::everything())
     );
-    // Initial refresh to set baseline
-    std::thread::sleep(Duration::from_millis(100));
-    sys.refresh_cpu();
-    sys.refresh_memory();
-    
-    // We want to generate as fast as possible, but batch it per frame
-    // to avoid excessive syscalls.
-
+    // Initial render
+    engine.begin_frame();
+    draw_demo_footer(&mut engine, width, height, &user_input, "Initializing...", footer_bg, 0);
+    engine.request_update();
+    engine.end_frame();
 
     // Event Loop
     let target_frame_time = Duration::from_micros(16_666); // ~60 FPS
     let mut last_tick = Instant::now();
+    let mut status_line = String::from("Starting...");
 
     while engine.is_running() {
         let now = Instant::now();
@@ -176,59 +167,40 @@ fn main() -> std::io::Result<()> {
                     _ => {}
                 }
 
-                // Immediate UI update for input responsiveness
-                let cx = 4 + u16::try_from(user_input.len()).unwrap_or(u16::MAX);
-                
-                // Clear input line first (visual hack: just write spaces or redraw footer?)
-                // Since we don't assume full redraw, we should clear the line.
-                // But full footer redraw is cheap.
-                for x in 0..width {
-                    engine.set_cell(x, height - 1, Cell::new(' ').with_bg(footer_bg));
-                }
-                
-                // Redraw Status + Input
-                // (We reuse the status string from last frame or standard one?)
-                // For input latency, we care about the INPUT text.
-                // Re-calculating FPS here is overkill? Just use last stats.
-                // We'll skip complex stats for input echo to be ultra-fast.
-                let prompt = "> ";
-                engine.draw_text(2, height - 1, prompt, Rgb::new(0, 255, 255), footer_bg);
-                
-                // Draw Input
-                engine.draw_text(4, height - 1, &user_input, Rgb::WHITE, footer_bg);
-                
-                // Draw Cursor
-                if cx < width {
-                    engine.set_cell(cx, height - 1, Cell::new('█').with_fg(Rgb::new(0, 255, 255)).with_bg(footer_bg));
-                }
-                
-                // Flush Input Update
+                // Redraw Footer immediately
+                draw_demo_footer(
+                    &mut engine, 
+                    width, 
+                    height, 
+                    &user_input, 
+                    &status_line, 
+                    footer_bg,
+                    frame_count
+                );
                 engine.request_update();
             }
             Err(RecvTimeoutError::Timeout) => {
                 // --- TICK PATH: Matrix Generation (60Hz) ---
                 last_tick = Instant::now();
-                engine.begin_frame();
+                let mut buffer_dirty = false;
 
-                // 1. Generate Matrix Text
+                // 1. Generate Matrix Text (Fast Path - Bypass Buffer)
                 let mut fast_output: Vec<u8> = Vec::with_capacity(4096);
-                
-                // Batch size: 50
                 for _ in 0..50 {
                     token_count += 1;
-                    
-                    // Simple random text
                     let color = rng.next_color();
                     stream.set_fg(color);
                     let c = rng.next_char();
-                    
                     let mut buf = [0u8; 4];
                     let s_char = c.encode_utf8(&mut buf);
-                    
-                    stream.append_fast_into(s_char, &mut fast_output);
-                } // End generation loop
+                    if stream.append_fast_into(s_char, &mut fast_output) {
+                        // All good, handled by RawOutput
+                    } else {
+                        // Slow path hit (wrap or scroll)
+                        buffer_dirty = true;
+                    }
+                }
 
-                // Flush Matrix
                 if !fast_output.is_empty() {
                     engine.write_raw(fast_output);
                 }
@@ -244,40 +216,73 @@ fn main() -> std::io::Result<()> {
                     let mem_mb = sys.used_memory() as f32 / 1024.0 / 1024.0;
                     let cpu = sys.global_cpu_info().cpu_usage();
                     
-                    let status = format!(
-                        "Esc: Quit | Ctrl+R: Reset | Chars: {token_count} | FPS: {fps:.1} | CPU: {cpu:.1}% | Mem: {mem_mb:.1}MB"
+                    status_line = format!(
+                        "Chars: {token_count} | FPS: {fps:.1} | CPU: {cpu:.1}% | Mem: {mem_mb:.1}MB"
+                    );
+                    buffer_dirty = true;
+                }
+
+                // 3. Blink Cursor or Handle Slow Path redrawing
+                if frame_count % 15 == 0 || stream.needs_redraw() || buffer_dirty {
+                    draw_demo_footer(
+                        &mut engine, 
+                        width, 
+                        height, 
+                        &user_input, 
+                        &status_line, 
+                        footer_bg,
+                        frame_count
                     );
                     
-                     // Draw Full Footer with Stats
-                    for x in 0..width {
-                        engine.set_cell(x, height - 1, Cell::new(' ').with_bg(footer_bg));
-                    }
-                    let status_len = u16::try_from(status.len()).unwrap_or(u16::MAX);
-                    let stat_x = width.saturating_sub(status_len + 2);
-                    engine.draw_text(stat_x, height - 1, &status, Rgb::new(150, 150, 150), footer_bg);
-                    
-                    // Redraw Input (since we cleared footer)
-                    engine.draw_text(2, height - 1, "> ", Rgb::new(0, 255, 255), footer_bg);
-                    engine.draw_text(4, height - 1, &user_input, Rgb::WHITE, footer_bg);
-                    let input_len = u16::try_from(user_input.len()).unwrap_or(u16::MAX);
-                    let cx = 4 + input_len;
-                    if cx < width {
-                        engine.set_cell(cx, height - 1, Cell::new('█').with_fg(Rgb::new(0, 255, 255)).with_bg(footer_bg));
+                    if stream.needs_redraw() || frame_count % 60 == 0 {
+                        stream.render(engine.buffer_mut());
                     }
                     
                     engine.request_update();
                 }
-
-                // 3. Render StreamWidget
-                if stream.needs_redraw() || frame_count % 60 == 0 {
-                    stream.render(engine.buffer_mut());
-                }
-
-                engine.end_frame();
             }
-            Err(_) => engine.stop(), // Disconnected or other error
+            Err(_) => break, // Disconnected or other error
         }
     }
 
     Ok(())
+}
+
+/// Helper to draw consistent UI.
+fn draw_demo_footer(
+    engine: &mut Engine,
+    width: u16,
+    height: u16,
+    user_input: &str,
+    status: &str,
+    bg: Rgb,
+    frame_count: u64,
+) {
+    let y = height.saturating_sub(1);
+    
+    // Clear line
+    for x in 0..width {
+        engine.set_cell(x, y, Cell::new(' ').with_bg(bg));
+    }
+
+    // Input left
+    engine.draw_text(2, y, "> ", Rgb::new(0, 255, 255), bg);
+    engine.draw_text(4, y, user_input, Rgb::WHITE, bg);
+
+    // Cursor
+    let input_len = u16::try_from(user_input.len()).unwrap_or(0);
+    let cx = 4 + input_len;
+    if cx < width && (frame_count % 30 < 15 || input_len > 0) {
+        // Blink except when typing
+        engine.set_cell(cx, y, Cell::new('█').with_fg(Rgb::new(0, 255, 255)).with_bg(bg));
+    }
+
+    // Status right
+    if !status.is_empty() {
+        let status_len = u16::try_from(status.len()).unwrap_or(0);
+        let stat_x = width.saturating_sub(status_len + 2);
+        if stat_x > cx + 2 {
+            engine.draw_text(stat_x, y, status, Rgb::new(150, 150, 150), bg);
+        }
+    }
 }
