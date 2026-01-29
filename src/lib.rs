@@ -45,6 +45,6 @@ pub mod ffi;
 // Re-exports for convenience
 pub use buffer::{Buffer, Cell, CellFlags, Modifiers, Rgb};
 pub use layout::{Layout, Rect, Region, RegionId};
-pub use actor::{Engine, EngineConfig, InputEvent, KeyCode, KeyModifiers, RenderCommand, AgentEvent};
+pub use actor::{Engine, EngineConfig, InputEvent, KeyCode, KeyModifiers, RenderCommand, AgentEvent, TickerActor, Tick};
 pub use widget::{StreamWidget, StreamConfig, AppendResult, ScrollBuffer};
 

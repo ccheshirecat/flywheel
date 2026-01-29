@@ -13,11 +13,11 @@
 //! - Per-character color attribute updates
 
 use flywheel::{
-    Cell, Engine, InputEvent, KeyCode, Rect, Rgb, StreamWidget,
+    Cell, Engine, InputEvent, KeyCode, Rect, Rgb, StreamWidget, TickerActor,
 };
 use std::time::{Duration, Instant};
 use sysinfo::{CpuRefreshKind, MemoryRefreshKind, RefreshKind, System};
-use crossbeam_channel::RecvTimeoutError;
+use crossbeam_channel::select;
 
 /// Simple LCG for deterministic randomness without dependencies.
 struct Rng {
@@ -109,122 +109,62 @@ fn main() -> std::io::Result<()> {
     engine.request_update();
     engine.end_frame();
 
-    // Event Loop
-    let target_frame_time = Duration::from_micros(16_666); // ~60 FPS
-    let mut last_tick = Instant::now();
+    // Spawn the ticker actor for 60 FPS frame pacing
+    let ticker = TickerActor::spawn(Duration::from_micros(16_666));
     let mut status_line = String::from("Starting...");
 
+    // Event-driven loop using select!
+    // This is the recommended pattern for flywheel applications.
     while engine.is_running() {
-        let now = Instant::now();
-        let time_since_tick = now.duration_since(last_tick);
-        // If we missed the window, poll immediately (timeout 0)
-        let timeout = target_frame_time.checked_sub(time_since_tick).unwrap_or(Duration::ZERO);
-
-        match engine.input_receiver().recv_timeout(timeout) {
-            Ok(event) => {
-                // --- FAST PATH: Input Event (Instant Echo) ---
-                match event {
-                    InputEvent::Key { code, modifiers } => match code {
-                        KeyCode::Esc => engine.stop(),
-                        KeyCode::Char('c') if modifiers.control => engine.stop(),
-                        KeyCode::Char('r') if modifiers.control => {
-                            // Reset
-                            stream.clear();
-                            token_count = 0;
-                            user_input.clear();
-                        }
-                        KeyCode::Char(c) => {
-                            if !modifiers.control && !modifiers.alt {
-                                user_input.push(c);
+        select! {
+            // PRIORITY 1: Handle input events immediately
+            recv(engine.input_receiver()) -> result => {
+                if let Ok(event) = result {
+                    match event {
+                        InputEvent::Key { code, modifiers } => match code {
+                            KeyCode::Esc => engine.stop(),
+                            KeyCode::Char('c') if modifiers.control => engine.stop(),
+                            KeyCode::Char('r') if modifiers.control => {
+                                stream.clear();
+                                token_count = 0;
+                                user_input.clear();
+                            }
+                            KeyCode::Char(c) => {
+                                if !modifiers.control && !modifiers.alt {
+                                    user_input.push(c);
+                                }
+                            },
+                            KeyCode::Backspace => { user_input.pop(); }
+                            KeyCode::Enter => { 
+                                user_input.clear();
+                                engine.request_redraw();
+                            },
+                            _ => {
+                                match code {
+                                    KeyCode::Up => stream.scroll_up(1),
+                                    KeyCode::Down => stream.scroll_down(1),
+                                    KeyCode::PageUp => stream.scroll_up(10),
+                                    KeyCode::PageDown => stream.scroll_down(10),
+                                    _ => {}
+                                }
                             }
                         },
-                        KeyCode::Backspace => { user_input.pop(); }
-                        KeyCode::Enter => { 
-                            user_input.clear();
-                            // Force full redraw to clear any ghost characters from Fast Path
-                            engine.request_redraw();
+                        InputEvent::MouseScroll { delta, .. } => {
+                            if delta > 0 { stream.scroll_up(1); }
+                            else { stream.scroll_down(1); }
                         },
-                        _ => {
-                            // Pass nav keys to widget
-                            // Mapping simplified for demo
-                            match code {
-                                KeyCode::Up => stream.scroll_up(1),
-                                KeyCode::Down => stream.scroll_down(1),
-                                KeyCode::PageUp => stream.scroll_up(10),
-                                KeyCode::PageDown => stream.scroll_down(10),
-                                _ => {}
-                            }
+                        InputEvent::Resize { width: w, height: h } => {
+                            width = w;
+                            height = h;
+                            engine.handle_resize(w, h);
+                            let new_h = h.saturating_sub(header_height + footer_height);
+                            stream.set_bounds(Rect::new(0, header_height, w, new_h));
                         }
-                    },
-                    InputEvent::MouseScroll { delta, .. } => {
-                        if delta > 0 { stream.scroll_up(1); }
-                        else { stream.scroll_down(1); }
-                    },
-                    InputEvent::Resize { width: w, height: h } => {
-                        width = w;
-                        height = h;
-                        engine.handle_resize(w, h);
-                        let new_h = h.saturating_sub(header_height + footer_height);
-                        stream.set_bounds(Rect::new(0, header_height, w, new_h));
+                        InputEvent::Shutdown => engine.stop(),
+                        _ => {}
                     }
-                    InputEvent::Shutdown => engine.stop(),
-                    _ => {}
-                }
 
-                // Redraw Footer immediately
-                draw_demo_footer(
-                    &mut engine, 
-                    width, 
-                    height, 
-                    &user_input, 
-                    &status_line, 
-                    footer_bg,
-                    frame_count
-                );
-                engine.request_update();
-            }
-            Err(RecvTimeoutError::Timeout) => {
-                // --- TICK PATH: Matrix Generation (60Hz) ---
-                last_tick = Instant::now();
-                let mut buffer_dirty = false;
-
-                // 1. Generate Matrix Text
-                // The push() API handles Fast/Slow path automatically.
-                for _ in 0..50 {
-                    token_count += 1;
-                    let color = rng.next_color();
-                    stream.set_fg(color);
-                    let c = rng.next_char();
-                    let mut buf = [0u8; 4];
-                    let s_char = c.encode_utf8(&mut buf);
-                    
-                    // Just push. The engine handles the rest.
-                    stream.push(&engine, s_char);
-                    
-                    if stream.needs_redraw() {
-                        buffer_dirty = true;
-                    }
-                }
-
-                // 2. Update Stats (Throttle)
-                frame_count += 1;
-                if frame_count % 30 == 0 {
-                    sys.refresh_cpu();
-                    sys.refresh_memory();
-                    
-                    let elapsed = start_time.elapsed().as_secs_f32();
-                    let fps = if elapsed > 0.0 { frame_count as f32 / elapsed } else { 0.0 };
-                    let mem_mb = sys.used_memory() as f32 / 1024.0 / 1024.0;
-                    let cpu = sys.global_cpu_info().cpu_usage();
-                    
-                    status_line = format!(
-                        "Chars: {token_count} | FPS: {fps:.1} | CPU: {cpu:.1}% | Mem: {mem_mb:.1}MB"
-                    );
-                    buffer_dirty = true;
-                }
-
-                // 3. Blink Cursor or Handle Slow Path redrawing
-                if frame_count % 15 == 0 || stream.needs_redraw() || buffer_dirty {
+                    // Immediately redraw footer on input
                     draw_demo_footer(
                         &mut engine, 
                         width, 
@@ -234,17 +174,65 @@ fn main() -> std::io::Result<()> {
                         footer_bg,
                         frame_count
                     );
-                    
-                    if stream.needs_redraw() || frame_count % 60 == 0 {
-                        stream.render(engine.buffer_mut());
-                    }
-                    
                     engine.request_update();
                 }
             }
-            Err(_) => break, // Disconnected or other error
+            
+            // PRIORITY 2: Generate content on tick (60 FPS)
+            recv(ticker.receiver()) -> result => {
+                if result.is_ok() {
+                    // Generate Matrix Text
+                    for _ in 0..50 {
+                        token_count += 1;
+                        let color = rng.next_color();
+                        stream.set_fg(color);
+                        let c = rng.next_char();
+                        let mut buf = [0u8; 4];
+                        let s_char = c.encode_utf8(&mut buf);
+                        stream.push(&engine, s_char);
+                    }
+
+                    // Update Stats (Throttle)
+                    frame_count += 1;
+                    if frame_count % 30 == 0 {
+                        sys.refresh_cpu();
+                        sys.refresh_memory();
+                        
+                        let elapsed = start_time.elapsed().as_secs_f32();
+                        let fps = if elapsed > 0.0 { frame_count as f32 / elapsed } else { 0.0 };
+                        let mem_mb = sys.used_memory() as f32 / 1024.0 / 1024.0;
+                        let cpu = sys.global_cpu_info().cpu_usage();
+                        
+                        status_line = format!(
+                            "Chars: {token_count} | FPS: {fps:.1} | CPU: {cpu:.1}% | Mem: {mem_mb:.1}MB"
+                        );
+                    }
+
+                    // Periodic full render (cursor blink, stats update)
+                    if frame_count % 15 == 0 || stream.needs_redraw() {
+                        draw_demo_footer(
+                            &mut engine, 
+                            width, 
+                            height, 
+                            &user_input, 
+                            &status_line, 
+                            footer_bg,
+                            frame_count
+                        );
+                        
+                        if stream.needs_redraw() || frame_count % 60 == 0 {
+                            stream.render(engine.buffer_mut());
+                        }
+                        
+                        engine.request_update();
+                    }
+                }
+            }
         }
     }
+
+    // Clean shutdown
+    ticker.join();
 
     Ok(())
 }

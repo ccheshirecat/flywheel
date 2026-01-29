@@ -163,12 +163,24 @@ impl Renderer {
     }
 
     /// Write raw bytes directly to the terminal.
+    ///
+    /// This is used by the Fast Path to bypass the buffer diffing.
+    /// After a raw write, we must invalidate the diff state to ensure
+    /// subsequent renders correctly handle cells that were modified.
     fn write_raw(&mut self, bytes: &[u8]) -> io::Result<()> {
         self.stdout.write_all(bytes)?;
         self.stdout.flush()?;
         self.stats.bytes_written += bytes.len() as u64;
-        // Invalidate ALL state (cursor, colors) since raw writes change them
+        
+        // CRITICAL: Invalidate current buffer state.
+        // RawOutput bypasses our double-buffering, so `current` no longer
+        // reflects what's actually on screen. Force next render to be full.
+        // This is the trade-off: Fast Path is only truly "fast" when
+        // followed by more Fast Path writes. Mixing Fast and Slow requires
+        // a full redraw to resync.
+        self.needs_full_redraw = true;
         self.diff_state.reset();
+        
         Ok(())
     }
 
