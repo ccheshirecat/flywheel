@@ -4,7 +4,6 @@
 //! Cells are stored in row-major order.
 
 use super::cell::{Cell, CellFlags, Rgb};
-use std::collections::HashMap;
 
 /// A grid of cells representing the terminal screen.
 ///
@@ -13,7 +12,7 @@ use std::collections::HashMap;
 ///
 /// # Overflow Storage
 ///
-/// Complex graphemes (> 4 bytes) are stored in a separate `HashMap`.
+/// Complex graphemes (>4 bytes) are stored in a separate arena (`Vec`).
 /// The cell contains an index into this overflow storage when the
 /// `OVERFLOW` flag is set.
 #[derive(Clone)]
@@ -24,10 +23,8 @@ pub struct Buffer {
     width: u16,
     /// Terminal height in rows.
     height: u16,
-    /// Overflow storage for complex graphemes.
-    overflow: HashMap<u32, String>,
-    /// Next overflow index to assign.
-    next_overflow_index: u32,
+    /// Overflow arena for complex graphemes (O(1) indexed access).
+    overflow: Vec<String>,
 }
 
 impl Buffer {
@@ -44,8 +41,7 @@ impl Buffer {
             cells: vec![Cell::EMPTY; size],
             width,
             height,
-            overflow: HashMap::new(),
-            next_overflow_index: 0,
+            overflow: Vec::new(),
         }
     }
 
@@ -157,10 +153,11 @@ impl Buffer {
             cell.set_fg(fg).set_bg(bg);
             cell
         } else {
-            // Overflow: store in HashMap
-            let overflow_idx = self.next_overflow_index;
-            self.next_overflow_index += 1;
-            self.overflow.insert(overflow_idx, grapheme.to_string());
+            // Overflow: store in arena (simple Vec indexing)
+            // Safety: Overflow arena is capped at u32::MAX entries (4 billion graphemes)
+            #[allow(clippy::cast_possible_truncation)]
+            let overflow_idx = self.overflow.len() as u32;
+            self.overflow.push(grapheme.to_string());
             Cell::overflow(overflow_idx, width).with_fg(fg).with_bg(bg)
         };
 
@@ -187,7 +184,7 @@ impl Buffer {
 
         if cell.flags().contains(CellFlags::OVERFLOW) {
             let idx = cell.overflow_index()?;
-            self.overflow.get(&idx).map(String::as_str)
+            self.overflow.get(idx as usize).map(String::as_str)
         } else {
             cell.grapheme()
         }
@@ -198,7 +195,7 @@ impl Buffer {
     /// This is used by the diffing engine when rendering overflow cells.
     #[inline]
     pub fn get_overflow(&self, index: u32) -> Option<&str> {
-        self.overflow.get(&index).map(String::as_str)
+        self.overflow.get(index as usize).map(String::as_str)
     }
 
     /// Fill a rectangular region with a cell.
@@ -216,7 +213,6 @@ impl Buffer {
     pub fn clear(&mut self) {
         self.cells.fill(Cell::EMPTY);
         self.overflow.clear();
-        self.next_overflow_index = 0;
     }
 
     /// Clear a rectangular region.
@@ -259,7 +255,6 @@ impl Buffer {
         debug_assert_eq!(self.height, other.height);
         self.cells.copy_from_slice(&other.cells);
         self.overflow.clone_from(&other.overflow);
-        self.next_overflow_index = other.next_overflow_index;
     }
 
     /// Swap the contents of two buffers.
@@ -270,7 +265,6 @@ impl Buffer {
         std::mem::swap(&mut self.width, &mut other.width);
         std::mem::swap(&mut self.height, &mut other.height);
         std::mem::swap(&mut self.overflow, &mut other.overflow);
-        std::mem::swap(&mut self.next_overflow_index, &mut other.next_overflow_index);
     }
 
     /// Get an iterator over rows.
@@ -286,7 +280,7 @@ impl Buffer {
     /// Get memory usage in bytes (approximate).
     pub fn memory_usage(&self) -> usize {
         let cells_size = self.cells.len() * std::mem::size_of::<Cell>();
-        let overflow_size: usize = self.overflow.values().map(|s| s.len() + 32).sum();
+        let overflow_size: usize = self.overflow.iter().map(|s| s.len() + 32).sum();
         cells_size + overflow_size + std::mem::size_of::<Self>()
     }
 }

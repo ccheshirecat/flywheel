@@ -139,7 +139,11 @@ fn main() -> std::io::Result<()> {
                             }
                         },
                         KeyCode::Backspace => { user_input.pop(); }
-                        KeyCode::Enter => { user_input.clear(); },
+                        KeyCode::Enter => { 
+                            user_input.clear();
+                            // Force full redraw to clear any ghost characters from Fast Path
+                            engine.request_redraw();
+                        },
                         _ => {
                             // Pass nav keys to widget
                             // Mapping simplified for demo

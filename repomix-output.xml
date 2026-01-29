@@ -1,0 +1,6463 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+benches/
+  cell_benchmark.rs
+  diff_benchmark.rs
+examples/
+  smoke_test.rs
+  streaming_demo.rs
+include/
+  flywheel.h
+src/
+  actor/
+    engine.rs
+    input.rs
+    messages.rs
+    mod.rs
+    renderer.rs
+  buffer/
+    buffer.rs
+    cell.rs
+    diff.rs
+    mod.rs
+  layout/
+    mod.rs
+    rect.rs
+    region.rs
+  terminal/
+    mod.rs
+    output.rs
+  widget/
+    mod.rs
+    scroll_buffer.rs
+    stream.rs
+  ffi.rs
+  lib.rs
+.gitignore
+ARCHITECTURE.md
+Cargo.toml
+cbindgen.toml
+README.md
+rustfmt.toml
+TRACKER.md
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="benches/cell_benchmark.rs">
+//! Cell benchmark: Measure Cell comparison performance.
+//!
+//! Target: < 1ns per comparison
+
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use flywheel::{Cell, Modifiers, Rgb};
+
+fn cell_equality_same(c: &mut Criterion) {
+    let cell_a = Cell::new('A')
+        .with_fg(Rgb::new(255, 128, 64))
+        .with_bg(Rgb::new(32, 32, 32))
+        .with_modifiers(Modifiers::BOLD);
+    let cell_b = cell_a;
+
+    c.bench_function("cell_eq_same", |b| {
+        b.iter(|| black_box(&cell_a) == black_box(&cell_b))
+    });
+}
+
+fn cell_equality_different_grapheme(c: &mut Criterion) {
+    let cell_a = Cell::new('A');
+    let cell_b = Cell::new('B');
+
+    c.bench_function("cell_eq_diff_grapheme", |b| {
+        b.iter(|| black_box(&cell_a) == black_box(&cell_b))
+    });
+}
+
+fn cell_equality_different_color(c: &mut Criterion) {
+    let cell_a = Cell::new('A').with_fg(Rgb::new(255, 0, 0));
+    let cell_b = Cell::new('A').with_fg(Rgb::new(0, 255, 0));
+
+    c.bench_function("cell_eq_diff_color", |b| {
+        b.iter(|| black_box(&cell_a) == black_box(&cell_b))
+    });
+}
+
+fn cell_from_char(c: &mut Criterion) {
+    c.bench_function("cell_from_char_ascii", |b| {
+        b.iter(|| Cell::from_char(black_box('A')))
+    });
+
+    c.bench_function("cell_from_char_cjk", |b| {
+        b.iter(|| Cell::from_char(black_box('日')))
+    });
+}
+
+criterion_group!(
+    benches,
+    cell_equality_same,
+    cell_equality_different_grapheme,
+    cell_equality_different_color,
+    cell_from_char,
+);
+criterion_main!(benches);
+</file>
+
+<file path="benches/diff_benchmark.rs">
+//! Diffing engine benchmark: Measure buffer diff performance.
+//!
+//! Target: < 500µs for 200×50 buffer
+
+use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
+use flywheel::{Buffer, Cell, Rgb};
+use flywheel::buffer::diff::{render_full_diff, render_full, DiffState};
+
+/// Create a buffer with random-ish content for benchmarking.
+fn create_test_buffer(width: u16, height: u16, seed: u8) -> Buffer {
+    let mut buffer = Buffer::new(width, height);
+    for y in 0..height {
+        for x in 0..width {
+            let c = ((x + y + seed as u16) % 26 + 65) as u8 as char; // A-Z
+            let cell = Cell::new(c)
+                .with_fg(Rgb::new(
+                    ((x * 3 + seed as u16) % 256) as u8,
+                    ((y * 7 + seed as u16) % 256) as u8,
+                    ((x + y + seed as u16) % 256) as u8,
+                ))
+                .with_bg(Rgb::new(20, 20, 30));
+            buffer.set(x, y, cell);
+        }
+    }
+    buffer
+}
+
+fn diff_identical_buffers(c: &mut Criterion) {
+    let buffer = create_test_buffer(200, 50, 0);
+    let buffer_clone = buffer.clone();
+
+    c.bench_function("diff_200x50_identical", |b| {
+        b.iter(|| {
+            let mut output = Vec::with_capacity(4096);
+            let mut state = DiffState::new();
+            render_full_diff(
+                black_box(&buffer),
+                black_box(&buffer_clone),
+                &mut output,
+                &mut state,
+            )
+        })
+    });
+}
+
+fn diff_single_cell_change(c: &mut Criterion) {
+    let buffer_a = create_test_buffer(200, 50, 0);
+    let mut buffer_b = buffer_a.clone();
+    // Change a single cell in the middle
+    buffer_b.set(100, 25, Cell::new('X').with_fg(Rgb::new(255, 0, 0)));
+
+    c.bench_function("diff_200x50_single_change", |b| {
+        b.iter(|| {
+            let mut output = Vec::with_capacity(4096);
+            let mut state = DiffState::new();
+            render_full_diff(
+                black_box(&buffer_a),
+                black_box(&buffer_b),
+                &mut output,
+                &mut state,
+            )
+        })
+    });
+}
+
+fn diff_many_changes(c: &mut Criterion) {
+    let buffer_a = create_test_buffer(200, 50, 0);
+    let buffer_b = create_test_buffer(200, 50, 1); // Different seed = different content
+
+    c.bench_function("diff_200x50_full_change", |b| {
+        b.iter(|| {
+            let mut output = Vec::with_capacity(65536);
+            let mut state = DiffState::new();
+            render_full_diff(
+                black_box(&buffer_a),
+                black_box(&buffer_b),
+                &mut output,
+                &mut state,
+            )
+        })
+    });
+}
+
+fn diff_line_change(c: &mut Criterion) {
+    let buffer_a = create_test_buffer(200, 50, 0);
+    let mut buffer_b = buffer_a.clone();
+    // Change one full line
+    for x in 0..200 {
+        buffer_b.set(x, 25, Cell::new('*').with_fg(Rgb::new(255, 255, 0)));
+    }
+
+    c.bench_function("diff_200x50_line_change", |b| {
+        b.iter(|| {
+            let mut output = Vec::with_capacity(4096);
+            let mut state = DiffState::new();
+            render_full_diff(
+                black_box(&buffer_a),
+                black_box(&buffer_b),
+                &mut output,
+                &mut state,
+            )
+        })
+    });
+}
+
+fn full_render(c: &mut Criterion) {
+    let buffer = create_test_buffer(200, 50, 0);
+
+    c.bench_function("render_full_200x50", |b| {
+        b.iter(|| {
+            let mut output = Vec::with_capacity(65536);
+            render_full(black_box(&buffer), &mut output)
+        })
+    });
+}
+
+fn diff_various_sizes(c: &mut Criterion) {
+    let mut group = c.benchmark_group("diff_by_size");
+    
+    for (width, height) in [(80, 24), (120, 40), (200, 50), (300, 80)] {
+        let buffer_a = create_test_buffer(width, height, 0);
+        let buffer_b = create_test_buffer(width, height, 1);
+        
+        group.bench_with_input(
+            BenchmarkId::new("full_change", format!("{}x{}", width, height)),
+            &(buffer_a, buffer_b),
+            |b, (a, bb)| {
+                b.iter(|| {
+                    let mut output = Vec::with_capacity(65536);
+                    let mut state = DiffState::new();
+                    render_full_diff(black_box(a), black_box(bb), &mut output, &mut state)
+                })
+            },
+        );
+    }
+    
+    group.finish();
+}
+
+criterion_group!(
+    benches,
+    diff_identical_buffers,
+    diff_single_cell_change,
+    diff_many_changes,
+    diff_line_change,
+    full_render,
+    diff_various_sizes,
+);
+criterion_main!(benches);
+</file>
+
+<file path="examples/smoke_test.rs">
+//! Smoke test: Verify the actor model with non-blocking input.
+//!
+//! This example demonstrates:
+//! - Engine initialization with raw mode and alternate screen
+//! - Non-blocking input polling
+//! - Frame-based rendering
+//! - Graceful shutdown on 'q' or Escape
+
+use flywheel::{Cell, Engine, InputEvent, KeyCode, Rgb};
+use std::time::Duration;
+
+fn main() -> std::io::Result<()> {
+    println!("Starting Flywheel Smoke Test...");
+    println!("Press 'q' or Escape to quit");
+    println!("Type any key to see it echoed");
+    std::thread::sleep(Duration::from_secs(1));
+
+    // Create the engine
+    let mut engine = Engine::new()?;
+
+    // Draw initial UI
+    let width = engine.width();
+    let height = engine.height();
+
+    // Title bar
+    let title = "Flywheel Smoke Test - Press 'q' to quit";
+    let bg_title = Rgb::new(40, 80, 120);
+    for x in 0..width {
+        engine.set_cell(x, 0, Cell::new(' ').with_bg(bg_title));
+    }
+    engine.draw_text(2, 0, title, Rgb::WHITE, bg_title);
+
+    // Info text
+    let info_y = 2;
+    engine.draw_text(2, info_y, &format!("Terminal size: {}x{}", width, height), Rgb::new(180, 180, 180), Rgb::DEFAULT_BG);
+    engine.draw_text(2, info_y + 1, "Frame: 0", Rgb::new(180, 180, 180), Rgb::DEFAULT_BG);
+    engine.draw_text(2, info_y + 2, "Last key: (none)", Rgb::new(180, 180, 180), Rgb::DEFAULT_BG);
+
+    // Instructions
+    engine.draw_text(2, info_y + 4, "Type to see characters appear below:", Rgb::new(150, 200, 150), Rgb::DEFAULT_BG);
+
+    // Request initial draw
+    engine.request_redraw();
+
+    // Typing area
+    let mut typed = String::new();
+    let type_y = info_y + 5;
+
+    // Main loop
+    while engine.is_running() {
+        engine.begin_frame();
+
+        // Process all pending input events
+        while let Some(event) = engine.poll_input() {
+            match event {
+                InputEvent::Key { code, modifiers } => {
+                    match code {
+                        KeyCode::Char('q') | KeyCode::Esc => {
+                            engine.stop();
+                        }
+                        KeyCode::Char('c') if modifiers.control => {
+                            engine.stop();
+                        }
+                        KeyCode::Char(c) => {
+                            typed.push(c);
+                            if typed.len() > (width - 4) as usize {
+                                typed.clear();
+                            }
+                            // Update typed text
+                            engine.buffer_mut().clear_rect(2, type_y, width - 4, 1);
+                            engine.draw_text(2, type_y, &typed, Rgb::new(100, 255, 100), Rgb::DEFAULT_BG);
+                        }
+                        KeyCode::Backspace => {
+                            typed.pop();
+                            engine.buffer_mut().clear_rect(2, type_y, width - 4, 1);
+                            engine.draw_text(2, type_y, &typed, Rgb::new(100, 255, 100), Rgb::DEFAULT_BG);
+                        }
+                        KeyCode::Enter => {
+                            typed.clear();
+                            engine.buffer_mut().clear_rect(2, type_y, width - 4, 1);
+                        }
+                        _ => {}
+                    }
+
+                    // Update last key display
+                    let key_str = format!("Last key: {:?} (modifiers: {:?})", code, modifiers);
+                    engine.buffer_mut().clear_rect(2, info_y + 2, width - 4, 1);
+                    engine.draw_text(2, info_y + 2, &key_str, Rgb::new(255, 200, 100), Rgb::DEFAULT_BG);
+                }
+
+                InputEvent::Resize { width: w, height: h } => {
+                    engine.handle_resize(w, h);
+                    // Update size display
+                    let size_str = format!("Terminal size: {}x{}", w, h);
+                    engine.buffer_mut().clear_rect(2, info_y, width - 4, 1);
+                    engine.draw_text(2, info_y, &size_str, Rgb::new(180, 180, 180), Rgb::DEFAULT_BG);
+                }
+
+                InputEvent::Error(e) => {
+                    eprintln!("Input error: {}", e);
+                }
+
+                InputEvent::Shutdown => {
+                    engine.stop();
+                }
+
+                _ => {}
+            }
+        }
+
+        // Update frame counter
+        let frame_str = format!("Frame: {}", engine.frame_count());
+        engine.buffer_mut().clear_rect(2, info_y + 1, 30, 1);
+        engine.draw_text(2, info_y + 1, &frame_str, Rgb::new(180, 180, 180), Rgb::DEFAULT_BG);
+
+        engine.end_frame();
+    }
+
+    Ok(())
+}
+</file>
+
+<file path="examples/streaming_demo.rs">
+//! Matrix Streaming Demo: High-speed infinite generation with input.
+#![allow(clippy::cast_precision_loss)]
+#![allow(clippy::cast_sign_loss)]
+#![allow(clippy::cast_possible_truncation)]
+#![allow(clippy::many_single_char_names)]
+#![allow(clippy::too_many_lines)]
+#![allow(clippy::missing_const_for_fn)]
+//!
+//! Demonstrates:
+//! - Infinite scrolling with high throughput
+//! - Zero-flicker rendering at max FPS
+//! - Responsive input handling during heavy load
+//! - Per-character color attribute updates
+
+use flywheel::{
+    Cell, Engine, InputEvent, KeyCode, Rect, Rgb, StreamWidget,
+};
+use std::time::{Duration, Instant};
+use sysinfo::{CpuRefreshKind, MemoryRefreshKind, RefreshKind, System};
+use crossbeam_channel::RecvTimeoutError;
+
+/// Simple LCG for deterministic randomness without dependencies.
+struct Rng {
+    state: u64,
+}
+
+impl Rng {
+    const fn new(seed: u64) -> Self {
+        Self { state: seed }
+    }
+
+    const fn next_u32(&mut self) -> u32 {
+        self.state = self.state.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+        (self.state >> 32) as u32
+    }
+
+    fn next_float(&mut self) -> f32 {
+        (self.next_u32() as f32) / (u32::MAX as f32)
+    }
+
+    fn next_char(&mut self) -> char {
+        // Printable ASCII: 33-126
+        let val = (self.next_u32() % 94) + 33;
+        val as u8 as char
+    }
+
+    fn next_color(&mut self) -> Rgb {
+        // High saturation colors
+        let hue = self.next_float() * 6.0;
+        let x = (1.0 - (hue % 2.0 - 1.0).abs()) * 255.0;
+        let c = 255.0;
+        
+        let (r, g, b) = match hue as i32 {
+            0 => (c, x, 0.0),
+            1 => (x, c, 0.0),
+            2 => (0.0, c, x),
+            3 => (0.0, x, c),
+            4 => (x, 0.0, c),
+            _ => (c, 0.0, x),
+        };
+        
+        Rgb::new(r as u8, g as u8, b as u8)
+    }
+}
+
+fn main() -> std::io::Result<()> {
+    println!("Flywheel Matrix Streaming Demo");
+    println!("==============================");
+    println!("Simulating high-speed infinite generation.");
+    println!("Type in the input box to test responsiveness.");
+    println!("Press Escape to quit (or Ctrl+C).\n");
+
+    std::thread::sleep(Duration::from_secs(1));
+
+    let mut engine = Engine::new()?;
+    let mut width = engine.width();
+    let mut height = engine.height();
+
+    // Layout
+    let header_height = 0u16;
+    let footer_height = 2u16;
+    let footer_bg = Rgb::new(30, 30, 30);
+    let content_height = height.saturating_sub(header_height + footer_height);
+
+    let mut stream = StreamWidget::new(Rect::new(0, header_height, width, content_height));
+    
+    // Initial colors
+
+
+    engine.request_redraw();
+
+    // State
+    let mut rng = Rng::new(12345);
+    let mut token_count = 0u64;
+    let mut frame_count = 0u64;
+    let start_time = Instant::now();
+    let mut user_input = String::new();
+
+    
+    // Resource monitoring
+    let mut sys = System::new_with_specifics(
+        RefreshKind::new()
+            .with_cpu(CpuRefreshKind::everything())
+            .with_memory(MemoryRefreshKind::everything())
+    );
+    // Initial render
+    engine.begin_frame();
+    draw_demo_footer(&mut engine, width, height, &user_input, "Initializing...", footer_bg, 0);
+    engine.request_update();
+    engine.end_frame();
+
+    // Event Loop
+    let target_frame_time = Duration::from_micros(16_666); // ~60 FPS
+    let mut last_tick = Instant::now();
+    let mut status_line = String::from("Starting...");
+
+    while engine.is_running() {
+        let now = Instant::now();
+        let time_since_tick = now.duration_since(last_tick);
+        // If we missed the window, poll immediately (timeout 0)
+        let timeout = target_frame_time.checked_sub(time_since_tick).unwrap_or(Duration::ZERO);
+
+        match engine.input_receiver().recv_timeout(timeout) {
+            Ok(event) => {
+                // --- FAST PATH: Input Event (Instant Echo) ---
+                match event {
+                    InputEvent::Key { code, modifiers } => match code {
+                        KeyCode::Esc => engine.stop(),
+                        KeyCode::Char('c') if modifiers.control => engine.stop(),
+                        KeyCode::Char('r') if modifiers.control => {
+                            // Reset
+                            stream.clear();
+                            token_count = 0;
+                            user_input.clear();
+                        }
+                        KeyCode::Char(c) => {
+                            if !modifiers.control && !modifiers.alt {
+                                user_input.push(c);
+                            }
+                        },
+                        KeyCode::Backspace => { user_input.pop(); }
+                        KeyCode::Enter => { user_input.clear(); },
+                        _ => {
+                            // Pass nav keys to widget
+                            // Mapping simplified for demo
+                            match code {
+                                KeyCode::Up => stream.scroll_up(1),
+                                KeyCode::Down => stream.scroll_down(1),
+                                KeyCode::PageUp => stream.scroll_up(10),
+                                KeyCode::PageDown => stream.scroll_down(10),
+                                _ => {}
+                            }
+                        }
+                    },
+                    InputEvent::MouseScroll { delta, .. } => {
+                        if delta > 0 { stream.scroll_up(1); }
+                        else { stream.scroll_down(1); }
+                    },
+                    InputEvent::Resize { width: w, height: h } => {
+                        width = w;
+                        height = h;
+                        engine.handle_resize(w, h);
+                        let new_h = h.saturating_sub(header_height + footer_height);
+                        stream.set_bounds(Rect::new(0, header_height, w, new_h));
+                    }
+                    InputEvent::Shutdown => engine.stop(),
+                    _ => {}
+                }
+
+                // Redraw Footer immediately
+                draw_demo_footer(
+                    &mut engine, 
+                    width, 
+                    height, 
+                    &user_input, 
+                    &status_line, 
+                    footer_bg,
+                    frame_count
+                );
+                engine.request_update();
+            }
+            Err(RecvTimeoutError::Timeout) => {
+                // --- TICK PATH: Matrix Generation (60Hz) ---
+                last_tick = Instant::now();
+                let mut buffer_dirty = false;
+
+                // 1. Generate Matrix Text (Fast Path - Bypass Buffer)
+                let mut fast_output: Vec<u8> = Vec::with_capacity(4096);
+                for _ in 0..50 {
+                    token_count += 1;
+                    let color = rng.next_color();
+                    stream.set_fg(color);
+                    let c = rng.next_char();
+                    let mut buf = [0u8; 4];
+                    let s_char = c.encode_utf8(&mut buf);
+                    if stream.append_fast_into(s_char, &mut fast_output) {
+                        // All good, handled by RawOutput
+                    } else {
+                        // Slow path hit (wrap or scroll)
+                        buffer_dirty = true;
+                    }
+                }
+
+                if !fast_output.is_empty() {
+                    engine.write_raw(fast_output);
+                }
+
+                // 2. Update Stats (Throttle)
+                frame_count += 1;
+                if frame_count % 30 == 0 {
+                    sys.refresh_cpu();
+                    sys.refresh_memory();
+                    
+                    let elapsed = start_time.elapsed().as_secs_f32();
+                    let fps = if elapsed > 0.0 { frame_count as f32 / elapsed } else { 0.0 };
+                    let mem_mb = sys.used_memory() as f32 / 1024.0 / 1024.0;
+                    let cpu = sys.global_cpu_info().cpu_usage();
+                    
+                    status_line = format!(
+                        "Chars: {token_count} | FPS: {fps:.1} | CPU: {cpu:.1}% | Mem: {mem_mb:.1}MB"
+                    );
+                    buffer_dirty = true;
+                }
+
+                // 3. Blink Cursor or Handle Slow Path redrawing
+                if frame_count % 15 == 0 || stream.needs_redraw() || buffer_dirty {
+                    draw_demo_footer(
+                        &mut engine, 
+                        width, 
+                        height, 
+                        &user_input, 
+                        &status_line, 
+                        footer_bg,
+                        frame_count
+                    );
+                    
+                    if stream.needs_redraw() || frame_count % 60 == 0 {
+                        stream.render(engine.buffer_mut());
+                    }
+                    
+                    engine.request_update();
+                }
+            }
+            Err(_) => break, // Disconnected or other error
+        }
+    }
+
+    Ok(())
+}
+
+/// Helper to draw consistent UI.
+fn draw_demo_footer(
+    engine: &mut Engine,
+    width: u16,
+    height: u16,
+    user_input: &str,
+    status: &str,
+    bg: Rgb,
+    frame_count: u64,
+) {
+    let y = height.saturating_sub(1);
+    
+    // Clear line
+    for x in 0..width {
+        engine.set_cell(x, y, Cell::new(' ').with_bg(bg));
+    }
+
+    // Input left
+    engine.draw_text(2, y, "> ", Rgb::new(0, 255, 255), bg);
+    engine.draw_text(4, y, user_input, Rgb::WHITE, bg);
+
+    // Cursor
+    let input_len = u16::try_from(user_input.len()).unwrap_or(0);
+    let cx = 4 + input_len;
+    if cx < width && (frame_count % 30 < 15 || input_len > 0) {
+        // Blink except when typing
+        engine.set_cell(cx, y, Cell::new('█').with_fg(Rgb::new(0, 255, 255)).with_bg(bg));
+    }
+
+    // Status right
+    if !status.is_empty() {
+        let status_len = u16::try_from(status.len()).unwrap_or(0);
+        let stat_x = width.saturating_sub(status_len + 2);
+        if stat_x > cx + 2 {
+            engine.draw_text(stat_x, y, status, Rgb::new(150, 150, 150), bg);
+        }
+    }
+}
+</file>
+
+<file path="include/flywheel.h">
+/**
+ * @file flywheel.h
+ * @brief Flywheel - Zero-flicker terminal compositor for Agentic CLIs
+ * 
+ * This header provides the C API for Flywheel, enabling high-frequency
+ * token streaming (100+ tokens/s) without flickering.
+ * 
+ * @version 0.1.0
+ * @date 2026-01-29
+ */
+
+#ifndef FLYWHEEL_H
+#define FLYWHEEL_H
+
+#include <stdint.h>
+#include <stdbool.h>
+#include <stddef.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* Version information */
+#define FLYWHEEL_VERSION "0.1.0"
+#define FLYWHEEL_VERSION_MAJOR 0
+#define FLYWHEEL_VERSION_MINOR 1
+#define FLYWHEEL_VERSION_PATCH 0
+
+/* ============================================================================
+ * Opaque Handle Types
+ * ============================================================================ */
+
+/** Opaque handle to a Flywheel engine. */
+typedef struct FlywheelEngine FlywheelEngine;
+
+/** Opaque handle to a stream widget. */
+typedef struct FlywheelStream FlywheelStream;
+
+/* ============================================================================
+ * Enums and Constants
+ * ============================================================================ */
+
+/** Result codes for FFI functions. */
+typedef enum FlywheelResult {
+    FLYWHEEL_RESULT_OK = 0,
+    FLYWHEEL_RESULT_NULL_POINTER = 1,
+    FLYWHEEL_RESULT_INVALID_UTF8 = 2,
+    FLYWHEEL_RESULT_IO_ERROR = 3,
+    FLYWHEEL_RESULT_OUT_OF_BOUNDS = 4,
+    FLYWHEEL_RESULT_NOT_RUNNING = 5,
+} FlywheelResult;
+
+/** Input event type from polling. */
+typedef enum FlywheelEventType {
+    FLYWHEEL_EVENT_NONE = 0,
+    FLYWHEEL_EVENT_KEY = 1,
+    FLYWHEEL_EVENT_RESIZE = 2,
+    FLYWHEEL_EVENT_ERROR = 3,
+    FLYWHEEL_EVENT_SHUTDOWN = 4,
+} FlywheelEventType;
+
+/* Key code constants */
+#define FLYWHEEL_KEY_NONE       0
+#define FLYWHEEL_KEY_ENTER      1
+#define FLYWHEEL_KEY_ESCAPE     2
+#define FLYWHEEL_KEY_BACKSPACE  3
+#define FLYWHEEL_KEY_TAB        4
+#define FLYWHEEL_KEY_LEFT       5
+#define FLYWHEEL_KEY_RIGHT      6
+#define FLYWHEEL_KEY_UP         7
+#define FLYWHEEL_KEY_DOWN       8
+#define FLYWHEEL_KEY_HOME       9
+#define FLYWHEEL_KEY_END        10
+#define FLYWHEEL_KEY_PAGE_UP    11
+#define FLYWHEEL_KEY_PAGE_DOWN  12
+#define FLYWHEEL_KEY_DELETE     13
+
+/* Modifier flags */
+#define FLYWHEEL_MOD_SHIFT  1
+#define FLYWHEEL_MOD_CTRL   2
+#define FLYWHEEL_MOD_ALT    4
+#define FLYWHEEL_MOD_SUPER  8
+
+/* ============================================================================
+ * Event Structures
+ * ============================================================================ */
+
+/** Key event data. */
+typedef struct FlywheelKeyEvent {
+    uint32_t char_code;     /**< Character code (for printable keys), or 0. */
+    int key_code;           /**< Special key code (FLYWHEEL_KEY_*). */
+    unsigned int modifiers; /**< Modifier flags (FLYWHEEL_MOD_*). */
+} FlywheelKeyEvent;
+
+/** Resize event data. */
+typedef struct FlywheelResizeEvent {
+    uint16_t width;  /**< New terminal width. */
+    uint16_t height; /**< New terminal height. */
+} FlywheelResizeEvent;
+
+/** Polled event structure. */
+typedef struct FlywheelEvent {
+    FlywheelEventType event_type; /**< Type of event. */
+    FlywheelKeyEvent key;         /**< Key event data (if event_type == KEY). */
+    FlywheelResizeEvent resize;   /**< Resize event data (if event_type == RESIZE). */
+} FlywheelEvent;
+
+/* ============================================================================
+ * Engine Functions
+ * ============================================================================ */
+
+/**
+ * Create a new Flywheel engine with default configuration.
+ * 
+ * The engine initializes the terminal in raw mode with alternate screen.
+ * 
+ * @return Handle to the engine, or NULL on failure.
+ */
+FlywheelEngine* flywheel_engine_new(void);
+
+/**
+ * Destroy a Flywheel engine and restore terminal state.
+ * 
+ * @param engine Engine handle (NULL is a no-op).
+ */
+void flywheel_engine_destroy(FlywheelEngine* engine);
+
+/**
+ * Get the terminal width in columns.
+ * 
+ * @param engine Engine handle.
+ * @return Terminal width, or 0 if engine is NULL.
+ */
+uint16_t flywheel_engine_width(const FlywheelEngine* engine);
+
+/**
+ * Get the terminal height in rows.
+ * 
+ * @param engine Engine handle.
+ * @return Terminal height, or 0 if engine is NULL.
+ */
+uint16_t flywheel_engine_height(const FlywheelEngine* engine);
+
+/**
+ * Check if the engine is still running.
+ * 
+ * @param engine Engine handle.
+ * @return true if running, false otherwise.
+ */
+bool flywheel_engine_is_running(const FlywheelEngine* engine);
+
+/**
+ * Stop the engine.
+ * 
+ * @param engine Engine handle.
+ */
+void flywheel_engine_stop(FlywheelEngine* engine);
+
+/**
+ * Poll for the next input event (non-blocking).
+ * 
+ * @param engine Engine handle.
+ * @param event_out Pointer to event structure to populate.
+ * @return Event type.
+ */
+FlywheelEventType flywheel_engine_poll_event(const FlywheelEngine* engine, FlywheelEvent* event_out);
+
+/**
+ * Handle a terminal resize event.
+ * 
+ * @param engine Engine handle.
+ * @param width New width.
+ * @param height New height.
+ */
+void flywheel_engine_handle_resize(FlywheelEngine* engine, uint16_t width, uint16_t height);
+
+/**
+ * Request a full screen redraw.
+ * 
+ * @param engine Engine handle.
+ */
+void flywheel_engine_request_redraw(const FlywheelEngine* engine);
+
+/**
+ * Request a diff-based screen update.
+ * 
+ * @param engine Engine handle.
+ */
+void flywheel_engine_request_update(const FlywheelEngine* engine);
+
+/**
+ * Begin a new frame. Call at the start of your render loop.
+ * 
+ * @param engine Engine handle.
+ */
+void flywheel_engine_begin_frame(FlywheelEngine* engine);
+
+/**
+ * End a frame and request update. Handles frame rate limiting.
+ * 
+ * @param engine Engine handle.
+ */
+void flywheel_engine_end_frame(FlywheelEngine* engine);
+
+/**
+ * Set a single cell at the given position.
+ * 
+ * @param engine Engine handle.
+ * @param x Column (0-indexed).
+ * @param y Row (0-indexed).
+ * @param c ASCII character.
+ * @param fg Foreground color (0xRRGGBB).
+ * @param bg Background color (0xRRGGBB).
+ */
+void flywheel_engine_set_cell(FlywheelEngine* engine, uint16_t x, uint16_t y, 
+                               char c, uint32_t fg, uint32_t bg);
+
+/**
+ * Draw text at the given position.
+ * 
+ * @param engine Engine handle.
+ * @param x Starting column (0-indexed).
+ * @param y Row (0-indexed).
+ * @param text UTF-8 null-terminated string.
+ * @param fg Foreground color (0xRRGGBB).
+ * @param bg Background color (0xRRGGBB).
+ * @return Number of columns used.
+ */
+uint16_t flywheel_engine_draw_text(FlywheelEngine* engine, uint16_t x, uint16_t y,
+                                    const char* text, uint32_t fg, uint32_t bg);
+
+/**
+ * Clear the entire buffer to default (black background, empty cells).
+ * 
+ * @param engine Engine handle.
+ */
+void flywheel_engine_clear(FlywheelEngine* engine);
+
+/**
+ * Fill a rectangle with a character.
+ * 
+ * @param engine Engine handle.
+ * @param x Starting column.
+ * @param y Starting row.
+ * @param width Rectangle width.
+ * @param height Rectangle height.
+ * @param c Fill character.
+ * @param fg Foreground color.
+ * @param bg Background color.
+ */
+void flywheel_engine_fill_rect(FlywheelEngine* engine, uint16_t x, uint16_t y,
+                                uint16_t width, uint16_t height,
+                                char c, uint32_t fg, uint32_t bg);
+
+/* ============================================================================
+ * Stream Widget Functions
+ * ============================================================================ */
+
+/**
+ * Create a new stream widget for high-frequency text streaming.
+ * 
+ * @param x Widget X position.
+ * @param y Widget Y position.
+ * @param width Widget width.
+ * @param height Widget height.
+ * @return Handle to the stream widget.
+ */
+FlywheelStream* flywheel_stream_new(uint16_t x, uint16_t y, uint16_t width, uint16_t height);
+
+/**
+ * Destroy a stream widget.
+ * 
+ * @param stream Stream widget handle (NULL is a no-op).
+ */
+void flywheel_stream_destroy(FlywheelStream* stream);
+
+/**
+ * Append text to the stream widget.
+ * 
+ * Uses fast path when possible (no newlines, fits on line).
+ * 
+ * @param stream Stream widget handle.
+ * @param text UTF-8 null-terminated string.
+ * @return 1 if fast path was used, 0 if slow path, -1 on error.
+ */
+int flywheel_stream_append(FlywheelStream* stream, const char* text);
+
+/**
+ * Render the stream widget to the engine's buffer.
+ * 
+ * @param stream Stream widget handle.
+ * @param engine Engine handle.
+ */
+void flywheel_stream_render(FlywheelStream* stream, FlywheelEngine* engine);
+
+/**
+ * Clear all content in the stream widget.
+ * 
+ * @param stream Stream widget handle.
+ */
+void flywheel_stream_clear(FlywheelStream* stream);
+
+/**
+ * Set the foreground color for subsequent text.
+ * 
+ * @param stream Stream widget handle.
+ * @param color Color (0xRRGGBB).
+ */
+void flywheel_stream_set_fg(FlywheelStream* stream, uint32_t color);
+
+/**
+ * Set the background color for subsequent text.
+ * 
+ * @param stream Stream widget handle.
+ * @param color Color (0xRRGGBB).
+ */
+void flywheel_stream_set_bg(FlywheelStream* stream, uint32_t color);
+
+/**
+ * Scroll the stream widget up by the given number of lines.
+ * 
+ * @param stream Stream widget handle.
+ * @param lines Number of lines to scroll.
+ */
+void flywheel_stream_scroll_up(FlywheelStream* stream, size_t lines);
+
+/**
+ * Scroll the stream widget down by the given number of lines.
+ * 
+ * @param stream Stream widget handle.
+ * @param lines Number of lines to scroll.
+ */
+void flywheel_stream_scroll_down(FlywheelStream* stream, size_t lines);
+
+/* ============================================================================
+ * Utility Functions
+ * ============================================================================ */
+
+/**
+ * Create an RGB color value from components.
+ * 
+ * @param r Red component (0-255).
+ * @param g Green component (0-255).
+ * @param b Blue component (0-255).
+ * @return 24-bit color value (0xRRGGBB).
+ */
+uint32_t flywheel_rgb(uint8_t r, uint8_t g, uint8_t b);
+
+/**
+ * Get the Flywheel version string.
+ * 
+ * @return Static version string (do not free).
+ */
+const char* flywheel_version(void);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* FLYWHEEL_H */
+</file>
+
+<file path="src/actor/engine.rs">
+//! Engine: Main coordinator that ties actors together.
+//!
+//! The Engine is the entry point for applications using Flywheel.
+//! It manages the terminal, spawns actors, and provides the main
+//! event loop.
+
+use super::messages::{InputEvent, RenderCommand};
+use super::{InputActor, RendererActor};
+use crate::buffer::{Buffer, Cell, Rgb};
+use crate::layout::Rect;
+use crossbeam_channel::{bounded, Receiver, Sender, TryRecvError};
+use crossterm::{
+    cursor,
+    event::EnableMouseCapture,
+    execute,
+    terminal::{self, EnterAlternateScreen, LeaveAlternateScreen},
+};
+use std::io::{self};
+use std::time::{Duration, Instant};
+
+/// Configuration for the Engine.
+#[derive(Debug, Clone)]
+pub struct EngineConfig {
+    /// Target frames per second.
+    pub target_fps: u32,
+    /// Input poll timeout.
+    pub input_poll_timeout: Duration,
+    /// Whether to enable mouse capture.
+    pub enable_mouse: bool,
+    /// Whether to use alternate screen buffer.
+    pub alternate_screen: bool,
+}
+
+impl Default for EngineConfig {
+    fn default() -> Self {
+        Self {
+            target_fps: 60,
+            input_poll_timeout: Duration::from_millis(10),
+            enable_mouse: false,
+            alternate_screen: true,
+        }
+    }
+}
+
+/// The main Flywheel engine.
+///
+/// This coordinates between the input and render actors, providing
+/// a simple interface for applications.
+pub struct Engine {
+    /// Configuration.
+    config: EngineConfig,
+    /// Input event receiver.
+    input_rx: Receiver<InputEvent>,
+    /// Render command sender.
+    render_tx: Sender<RenderCommand>,
+    /// Input actor handle.
+    input_actor: Option<InputActor>,
+    /// Renderer actor handle.
+    #[allow(dead_code)]
+    renderer_actor: Option<RendererActor>,
+    /// Application buffer (for modifications).
+    buffer: Buffer,
+    /// Terminal width.
+    width: u16,
+    /// Terminal height.
+    height: u16,
+    /// Frame timing.
+    frame_start: Instant,
+    frame_duration: Duration,
+    frame_count: u64,
+    /// Whether the engine is running.
+    running: bool,
+}
+
+impl Engine {
+    /// Create a new engine with default configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if terminal setup fails (raw mode, alternate screen, etc.).
+    pub fn new() -> io::Result<Self> {
+        Self::with_config(EngineConfig::default())
+    }
+
+    /// Create a new engine with custom configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if terminal setup fails.
+    pub fn with_config(config: EngineConfig) -> io::Result<Self> {
+        // Get terminal size
+        let (width, height) = terminal::size()?;
+
+        // Enter raw mode and alternate screen
+        terminal::enable_raw_mode()?;
+
+        let mut stdout = io::stdout();
+        if config.alternate_screen {
+            execute!(stdout, EnterAlternateScreen)?;
+        }
+        if config.enable_mouse {
+            execute!(stdout, EnableMouseCapture)?;
+        }
+        execute!(stdout, cursor::Hide)?;
+
+        // Create channels
+        let (input_tx, input_rx) = bounded::<InputEvent>(64);
+        let (render_tx, render_rx) = bounded::<RenderCommand>(16);
+
+        // Spawn actors
+        let input_actor = InputActor::spawn(input_tx, config.input_poll_timeout);
+        let renderer_actor = RendererActor::spawn(render_rx, width, height);
+
+        let frame_duration = Duration::from_secs(1) / config.target_fps;
+
+        Ok(Self {
+            config,
+            input_rx,
+            render_tx,
+            input_actor: Some(input_actor),
+            renderer_actor: Some(renderer_actor),
+            buffer: Buffer::new(width, height),
+            width,
+            height,
+            frame_start: Instant::now(),
+            frame_duration,
+            frame_count: 0,
+            running: true,
+        })
+    }
+
+    /// Get the terminal width.
+    pub const fn width(&self) -> u16 {
+        self.width
+    }
+
+    /// Get the terminal height.
+    pub const fn height(&self) -> u16 {
+        self.height
+    }
+
+    /// Get a reference to the buffer.
+    pub const fn buffer(&self) -> &Buffer {
+        &self.buffer
+    }
+
+    /// Get a mutable reference to the buffer.
+    pub const fn buffer_mut(&mut self) -> &mut Buffer {
+        &mut self.buffer
+    }
+
+    /// Get the input receiver for event-driven loops.
+    pub const fn input_receiver(&self) -> &Receiver<InputEvent> {
+        &self.input_rx
+    }
+
+    /// Check if the engine is still running.
+    pub const fn is_running(&self) -> bool {
+        self.running
+    }
+
+    /// Stop the engine.
+    pub const fn stop(&mut self) {
+        self.running = false;
+    }
+
+    /// Poll for the next input event (non-blocking).
+    ///
+    /// Returns `None` if no event is available.
+    pub fn poll_input(&self) -> Option<InputEvent> {
+        match self.input_rx.try_recv() {
+            Ok(event) => Some(event),
+            Err(TryRecvError::Empty) => None,
+            Err(TryRecvError::Disconnected) => {
+                Some(InputEvent::Error("Input channel disconnected".to_string()))
+            }
+        }
+    }
+
+    /// Wait for the next input event (blocking with timeout).
+    pub fn wait_input(&self, timeout: Duration) -> Option<InputEvent> {
+        self.input_rx.recv_timeout(timeout).ok()
+    }
+
+    /// Drain all pending input events.
+    pub fn drain_input(&self) -> Vec<InputEvent> {
+        let mut events = Vec::new();
+        while let Ok(event) = self.input_rx.try_recv() {
+            events.push(event);
+        }
+        events
+    }
+
+    /// Request a full redraw.
+    pub fn request_redraw(&self) {
+        let _ = self.render_tx.send(RenderCommand::FullRedraw(Box::new(self.buffer.clone())));
+    }
+
+    /// Request a diff-based update.
+    pub fn request_update(&self) {
+        let _ = self.render_tx.send(RenderCommand::Update(Box::new(self.buffer.clone())));
+    }
+
+    /// Set the cursor position (or hide it).
+    pub fn set_cursor(&self, x: Option<u16>, y: u16) {
+        let _ = self.render_tx.send(RenderCommand::SetCursor { x, y });
+    }
+
+    /// Write raw bytes to the output (Fast Path).
+    pub fn write_raw(&self, bytes: Vec<u8>) {
+        let _ = self.render_tx.send(RenderCommand::RawOutput { bytes });
+    }
+
+    /// Handle a resize event.
+    pub fn handle_resize(&mut self, width: u16, height: u16) {
+        self.width = width;
+        self.height = height;
+        self.buffer.resize(width, height);
+        let _ = self.render_tx.send(RenderCommand::Resize { width, height });
+    }
+
+    /// Begin a new frame.
+    ///
+    /// Call this at the start of your render loop.
+    pub fn begin_frame(&mut self) {
+        self.frame_start = Instant::now();
+    }
+
+    /// End a frame and request update.
+    ///
+    /// This will sleep if necessary to maintain the target FPS.
+    pub fn end_frame(&mut self) {
+        self.frame_count += 1;
+
+        // Request render
+        self.request_update();
+
+        // Frame rate limiting
+        let elapsed = self.frame_start.elapsed();
+        if elapsed < self.frame_duration {
+            std::thread::sleep(self.frame_duration - elapsed);
+        }
+    }
+
+    /// Get the current frame count.
+    pub const fn frame_count(&self) -> u64 {
+        self.frame_count
+    }
+
+    /// Convenience: Set a cell in the buffer.
+    pub fn set_cell(&mut self, x: u16, y: u16, cell: Cell) {
+        self.buffer.set(x, y, cell);
+    }
+
+    /// Convenience: Set a grapheme in the buffer.
+    pub fn set_grapheme(&mut self, x: u16, y: u16, grapheme: &str, fg: Rgb, bg: Rgb) -> u8 {
+        self.buffer.set_grapheme(x, y, grapheme, fg, bg)
+    }
+
+    /// Convenience: Clear the buffer.
+    pub fn clear(&mut self) {
+        self.buffer.clear();
+    }
+
+    /// Convenience: Fill a rectangle.
+    pub fn fill_rect(&mut self, rect: Rect, cell: Cell) {
+        self.buffer.fill_rect(rect.x, rect.y, rect.width, rect.height, cell);
+    }
+
+    /// Draw text at a position.
+    ///
+    /// Returns the number of columns used.
+    pub fn draw_text(&mut self, x: u16, y: u16, text: &str, fg: Rgb, bg: Rgb) -> u16 {
+        let mut col = x;
+        for grapheme in unicode_segmentation::UnicodeSegmentation::graphemes(text, true) {
+            if col >= self.width {
+                break;
+            }
+            let width = self.buffer.set_grapheme(col, y, grapheme, fg, bg);
+            col += u16::from(width);
+        }
+        col - x
+    }
+}
+
+impl Drop for Engine {
+    fn drop(&mut self) {
+        // Stop actors
+        if let Some(actor) = self.input_actor.take() {
+            actor.join();
+        }
+
+        let _ = self.render_tx.send(RenderCommand::Shutdown);
+
+        // Restore terminal state
+        let mut stdout = io::stdout();
+        let _ = execute!(stdout, cursor::Show);
+        if self.config.enable_mouse {
+            let _ = execute!(stdout, crossterm::event::DisableMouseCapture);
+        }
+        if self.config.alternate_screen {
+            let _ = execute!(stdout, LeaveAlternateScreen);
+        }
+        let _ = terminal::disable_raw_mode();
+    }
+}
+</file>
+
+<file path="src/actor/input.rs">
+//! Input Actor: Dedicated thread for polling terminal events.
+//!
+//! This actor runs in its own thread and uses crossterm's event polling
+//! to capture keyboard, mouse, and resize events without blocking the
+//! main application.
+
+use super::messages::{InputEvent, KeyCode, KeyModifiers, MouseButton, MouseEvent};
+use crossbeam_channel::Sender;
+use crossterm::event::{self, Event, KeyEventKind};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::thread::{self, JoinHandle};
+use std::time::Duration;
+
+/// Input actor that polls terminal events.
+pub struct InputActor {
+    /// Handle to the input thread.
+    handle: Option<JoinHandle<()>>,
+    /// Flag to signal shutdown.
+    shutdown: Arc<AtomicBool>,
+}
+
+impl InputActor {
+    /// Spawn the input actor thread.
+    ///
+    /// # Arguments
+    ///
+    /// * `sender` - Channel to send input events to the main loop.
+    /// * `poll_timeout` - How long to wait for events before checking shutdown.
+    ///
+    /// # Returns
+    ///
+    /// The input actor handle.
+    #[allow(clippy::missing_panics_doc)]
+    pub fn spawn(sender: Sender<InputEvent>, poll_timeout: Duration) -> Self {
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let shutdown_clone = shutdown.clone();
+
+        let handle = thread::Builder::new()
+            .name("flywheel-input".to_string())
+            .spawn(move || {
+                Self::run_loop(&sender, &shutdown_clone, poll_timeout);
+            })
+            .expect("Failed to spawn input thread");
+
+        Self {
+            handle: Some(handle),
+            shutdown,
+        }
+    }
+
+    /// Signal the input thread to shutdown.
+    pub fn shutdown(&self) {
+        self.shutdown.store(true, Ordering::Relaxed);
+    }
+
+    /// Wait for the input thread to finish.
+    pub fn join(mut self) {
+        self.shutdown();
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+
+    /// Main input polling loop.
+    #[allow(clippy::collapsible_if)]
+    fn run_loop(sender: &Sender<InputEvent>, shutdown: &Arc<AtomicBool>, poll_timeout: Duration) {
+        loop {
+            // Check for shutdown
+            if shutdown.load(Ordering::Relaxed) {
+                let _ = sender.send(InputEvent::Shutdown);
+                break;
+            }
+
+            // Poll for events with timeout
+            match event::poll(poll_timeout) {
+                Ok(true) => {
+                    // Event available, read it
+                    match event::read() {
+                        Ok(event) => {
+                            if let Some(input_event) = Self::convert_event(event) {
+                                if sender.send(input_event).is_err() {
+                                    // Receiver dropped, exit
+                                    break;
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            let _ = sender.send(InputEvent::Error(e.to_string()));
+                        }
+                    }
+                }
+                Ok(false) => {
+                    // No event, continue loop (will check shutdown)
+                }
+                Err(e) => {
+                    let _ = sender.send(InputEvent::Error(e.to_string()));
+                }
+            }
+        }
+    }
+
+    /// Convert a crossterm event to our `InputEvent`.
+    fn convert_event(event: Event) -> Option<InputEvent> {
+        match event {
+            Event::Key(key_event) => {
+                // Only process key press events (not release or repeat)
+                if key_event.kind != KeyEventKind::Press {
+                    return None;
+                }
+
+                let code = Self::convert_key_code(key_event.code)?;
+                let modifiers = Self::convert_modifiers(key_event.modifiers);
+
+                Some(InputEvent::Key { code, modifiers })
+            }
+
+            Event::Mouse(mouse_event) => Self::convert_mouse_event(mouse_event),
+
+            Event::Resize(width, height) => Some(InputEvent::Resize { width, height }),
+
+            Event::FocusGained => Some(InputEvent::FocusGained),
+
+            Event::FocusLost => Some(InputEvent::FocusLost),
+
+            Event::Paste(text) => Some(InputEvent::Paste(text)),
+        }
+    }
+
+    /// Convert crossterm `KeyCode` to our `KeyCode`.
+    const fn convert_key_code(code: event::KeyCode) -> Option<KeyCode> {
+        Some(match code {
+            event::KeyCode::Char(c) => KeyCode::Char(c),
+            event::KeyCode::F(n) => KeyCode::F(n),
+            event::KeyCode::Backspace => KeyCode::Backspace,
+            event::KeyCode::Enter => KeyCode::Enter,
+            event::KeyCode::Left => KeyCode::Left,
+            event::KeyCode::Right => KeyCode::Right,
+            event::KeyCode::Up => KeyCode::Up,
+            event::KeyCode::Down => KeyCode::Down,
+            event::KeyCode::Home => KeyCode::Home,
+            event::KeyCode::End => KeyCode::End,
+            event::KeyCode::PageUp => KeyCode::PageUp,
+            event::KeyCode::PageDown => KeyCode::PageDown,
+            event::KeyCode::Tab => KeyCode::Tab,
+            event::KeyCode::BackTab => KeyCode::BackTab,
+            event::KeyCode::Delete => KeyCode::Delete,
+            event::KeyCode::Insert => KeyCode::Insert,
+            event::KeyCode::Esc => KeyCode::Esc,
+            event::KeyCode::Null => KeyCode::Null,
+            _ => return None, // Ignore other key codes
+        })
+    }
+
+    /// Convert crossterm `KeyModifiers` to our `KeyModifiers`.
+    const fn convert_modifiers(mods: event::KeyModifiers) -> KeyModifiers {
+        KeyModifiers {
+            shift: mods.contains(event::KeyModifiers::SHIFT),
+            control: mods.contains(event::KeyModifiers::CONTROL),
+            alt: mods.contains(event::KeyModifiers::ALT),
+            super_key: mods.contains(event::KeyModifiers::SUPER),
+        }
+    }
+
+    /// Convert crossterm `MouseEvent` to our `InputEvent`.
+    const fn convert_mouse_event(mouse: event::MouseEvent) -> Option<InputEvent> {
+        let modifiers = Self::convert_modifiers(mouse.modifiers);
+
+        match mouse.kind {
+            event::MouseEventKind::Down(button) => {
+                let button = Self::convert_mouse_button(button);
+                Some(InputEvent::MouseDown(MouseEvent {
+                    x: mouse.column,
+                    y: mouse.row,
+                    button: Some(button),
+                    modifiers,
+                }))
+            }
+            event::MouseEventKind::Up(button) => {
+                let button = Self::convert_mouse_button(button);
+                Some(InputEvent::MouseUp(MouseEvent {
+                    x: mouse.column,
+                    y: mouse.row,
+                    button: Some(button),
+                    modifiers,
+                }))
+            }
+            event::MouseEventKind::Moved => Some(InputEvent::MouseMove(MouseEvent {
+                x: mouse.column,
+                y: mouse.row,
+                button: None,
+                modifiers,
+            })),
+            event::MouseEventKind::Drag(button) => {
+                let button = Self::convert_mouse_button(button);
+                Some(InputEvent::MouseMove(MouseEvent {
+                    x: mouse.column,
+                    y: mouse.row,
+                    button: Some(button),
+                    modifiers,
+                }))
+            }
+            event::MouseEventKind::ScrollUp => Some(InputEvent::MouseScroll {
+                x: mouse.column,
+                y: mouse.row,
+                delta: 1,
+            }),
+            event::MouseEventKind::ScrollDown => Some(InputEvent::MouseScroll {
+                x: mouse.column,
+                y: mouse.row,
+                delta: -1,
+            }),
+            _ => None,
+        }
+    }
+
+    /// Convert crossterm `MouseButton` to our `MouseButton`.
+    const fn convert_mouse_button(button: event::MouseButton) -> MouseButton {
+        match button {
+            event::MouseButton::Left => MouseButton::Left,
+            event::MouseButton::Right => MouseButton::Right,
+            event::MouseButton::Middle => MouseButton::Middle,
+        }
+    }
+}
+
+impl Drop for InputActor {
+    fn drop(&mut self) {
+        self.shutdown();
+    }
+}
+</file>
+
+<file path="src/actor/messages.rs">
+//! Message types for actor communication.
+//!
+//! These enums define the protocol between actors in the system.
+
+use std::time::Instant;
+use crate::buffer::Buffer;
+
+/// Key codes for keyboard input.
+///
+/// This is a simplified subset of crossterm's `KeyCode`, designed
+/// for the needs of agentic CLIs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum KeyCode {
+    /// A printable character.
+    Char(char),
+    /// Function key (F1-F12).
+    F(u8),
+    /// Backspace key.
+    Backspace,
+    /// Enter/Return key.
+    Enter,
+    /// Left arrow.
+    Left,
+    /// Right arrow.
+    Right,
+    /// Up arrow.
+    Up,
+    /// Down arrow.
+    Down,
+    /// Home key.
+    Home,
+    /// End key.
+    End,
+    /// Page Up.
+    PageUp,
+    /// Page Down.
+    PageDown,
+    /// Tab key.
+    Tab,
+    /// Backtab (Shift+Tab).
+    BackTab,
+    /// Delete key.
+    Delete,
+    /// Insert key.
+    Insert,
+    /// Escape key.
+    Esc,
+    /// Null (Ctrl+Space on some terminals).
+    Null,
+}
+
+/// Key modifiers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[allow(clippy::struct_excessive_bools)]
+pub struct KeyModifiers {
+    /// Shift key held.
+    pub shift: bool,
+    /// Control key held.
+    pub control: bool,
+    /// Alt/Option key held.
+    pub alt: bool,
+    /// Super/Command/Windows key held.
+    pub super_key: bool,
+}
+
+impl KeyModifiers {
+    /// No modifiers.
+    pub const NONE: Self = Self {
+        shift: false,
+        control: false,
+        alt: false,
+        super_key: false,
+    };
+
+    /// Check if any modifier is active.
+    pub const fn any(&self) -> bool {
+        self.shift || self.control || self.alt || self.super_key
+    }
+}
+
+/// Mouse button.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MouseButton {
+    /// Left mouse button.
+    Left,
+    /// Right mouse button.
+    Right,
+    /// Middle mouse button.
+    Middle,
+}
+
+/// Mouse event details.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MouseEvent {
+    /// X coordinate (column).
+    pub x: u16,
+    /// Y coordinate (row).
+    pub y: u16,
+    /// Mouse button involved (if any).
+    pub button: Option<MouseButton>,
+    /// Key modifiers held during mouse event.
+    pub modifiers: KeyModifiers,
+}
+
+/// Events from the input thread.
+///
+/// These are sent from the input actor to the main loop.
+#[derive(Debug, Clone)]
+pub enum InputEvent {
+    /// A key was pressed.
+    Key {
+        /// The key code.
+        code: KeyCode,
+        /// Modifiers held during keypress.
+        modifiers: KeyModifiers,
+    },
+
+    /// Mouse button pressed.
+    MouseDown(MouseEvent),
+
+    /// Mouse button released.
+    MouseUp(MouseEvent),
+
+    /// Mouse moved (only if tracking enabled).
+    MouseMove(MouseEvent),
+
+    /// Mouse scroll.
+    MouseScroll {
+        /// X coordinate.
+        x: u16,
+        /// Y coordinate.
+        y: u16,
+        /// Scroll delta (positive = up, negative = down).
+        delta: i16,
+    },
+
+    /// Terminal was resized.
+    Resize {
+        /// New width in columns.
+        width: u16,
+        /// New height in rows.
+        height: u16,
+    },
+
+    /// Focus gained.
+    FocusGained,
+
+    /// Focus lost.
+    FocusLost,
+
+    /// Paste event (bracketed paste).
+    Paste(String),
+
+    /// Input thread encountered an error.
+    Error(String),
+
+    /// Input thread is shutting down.
+    Shutdown,
+}
+
+/// Commands sent to the render thread.
+#[derive(Debug)]
+pub enum RenderCommand {
+    /// Request a full redraw with new buffer content.
+    FullRedraw(Box<Buffer>),
+
+    /// Request a diff-based update.
+    /// Request a diff-based update with new buffer content.
+    Update(Box<Buffer>),
+
+    /// Resize the buffers.
+    Resize {
+        /// New width.
+        width: u16,
+        /// New height.
+        height: u16,
+    },
+
+    /// Set the cursor position and visibility.
+    SetCursor {
+        /// X position (None = hide cursor).
+        x: Option<u16>,
+        /// Y position.
+        y: u16,
+    },
+
+    /// Write raw bytes directly to the terminal output.
+    ///
+    /// This is used for the "Fast Path" optimization: directly writing generated
+    /// ANSI sequences without going through the diffing engine.
+    ///
+    /// **Warning**: The caller is responsible for ensuring these bytes do not
+    /// corrupt the terminal state or contradict the buffer state.
+    RawOutput {
+        /// The raw bytes to write.
+        bytes: Vec<u8>,
+    },
+
+    /// Shutdown the render thread.
+    Shutdown,
+}
+
+/// Events from agent/network threads.
+///
+/// These represent async data arriving from external sources.
+#[derive(Debug, Clone)]
+pub enum AgentEvent {
+    /// Token(s) received from agent stream.
+    Tokens {
+        /// The text content.
+        content: String,
+        /// Source identifier (for multi-agent scenarios).
+        source_id: u32,
+        /// Whether this is the final chunk.
+        is_final: bool,
+    },
+
+    /// Agent started a new response.
+    ResponseStart {
+        /// Source identifier.
+        source_id: u32,
+    },
+
+    /// Agent finished responding.
+    ResponseEnd {
+        /// Source identifier.
+        source_id: u32,
+    },
+
+    /// Agent encountered an error.
+    Error {
+        /// Error message.
+        message: String,
+        /// Source identifier.
+        source_id: u32,
+    },
+
+    /// Connection status changed.
+    ConnectionStatus {
+        /// Whether connected.
+        connected: bool,
+        /// Source identifier.
+        source_id: u32,
+    },
+}
+
+/// Frame timing information.
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct FrameInfo {
+    /// Frame number since engine start.
+    pub frame_number: u64,
+    /// Time when this frame started.
+    pub frame_start: Instant,
+    /// Duration of the previous frame's render.
+    pub last_render_time: std::time::Duration,
+    /// Current FPS (smoothed).
+    pub fps: f32,
+}
+
+impl Default for FrameInfo {
+    fn default() -> Self {
+        Self {
+            frame_number: 0,
+            frame_start: Instant::now(),
+            last_render_time: std::time::Duration::ZERO,
+            fps: 0.0,
+        }
+    }
+}
+</file>
+
+<file path="src/actor/mod.rs">
+//! Actor Model: Message-passing concurrency for the TUI engine.
+//!
+//! This module implements a simple actor system using crossbeam channels:
+//! - **Input Actor**: Polls terminal events, forwards to main loop
+//! - **Render Actor**: Receives render commands, diffs and flushes
+//! - **Main Loop**: Coordinates between actors, handles application logic
+//!
+//! # Architecture
+//!
+//! ```text
+//! ┌──────────────┐     InputEvent      ┌──────────────┐
+//! │ Input Thread │ ─────────────────▶  │              │
+//! └──────────────┘                     │  Main Loop   │
+//!                                      │              │
+//! ┌──────────────┐    RenderCommand    │              │
+//! │Render Thread │ ◀───────────────── │              │
+//! └──────────────┘                     └──────────────┘
+//!                                            │
+//!                                            │ AgentEvent
+//!                                            ▼
+//!                                      ┌──────────────┐
+//!                                      │ Agent/Network│
+//!                                      └──────────────┘
+//! ```
+
+mod messages;
+mod input;
+mod renderer;
+mod engine;
+
+pub use messages::{InputEvent, RenderCommand, AgentEvent, KeyCode, KeyModifiers, MouseButton, MouseEvent};
+pub use input::InputActor;
+pub use renderer::RendererActor;
+pub use engine::{Engine, EngineConfig};
+</file>
+
+<file path="src/actor/renderer.rs">
+//! Renderer Actor: Dedicated thread for rendering to the terminal.
+//!
+//! This actor owns the terminal and double buffers. It receives render
+//! commands from the main loop and performs the actual diffing and
+//! output flushing.
+
+use super::messages::RenderCommand;
+use crate::buffer::diff::{render_diff, render_full, DiffState};
+use crate::buffer::Buffer;
+use crate::layout::Rect;
+use crossbeam_channel::Receiver;
+use std::io::{self, Stdout, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::thread::{self, JoinHandle};
+use std::time::{Duration, Instant};
+
+/// Renderer actor that handles terminal output.
+pub struct RendererActor {
+    /// Handle to the render thread.
+    handle: Option<JoinHandle<()>>,
+    /// Flag to signal shutdown.
+    shutdown: Arc<AtomicBool>,
+}
+
+/// Render statistics for debugging/profiling.
+#[derive(Debug, Clone, Default)]
+pub struct RenderStats {
+    /// Total frames rendered.
+    pub frames: u64,
+    /// Total cells changed across all frames.
+    #[allow(dead_code)]
+    pub cells_changed: u64,
+    /// Total bytes written to terminal.
+    pub bytes_written: u64,
+    /// Average render time in microseconds.
+    pub avg_render_us: u64,
+    /// Last render time in microseconds.
+    pub last_render_us: u64,
+}
+
+/// Internal renderer state.
+struct Renderer {
+    /// Current (visible) buffer.
+    current: Buffer,
+    /// Next (being drawn) buffer.
+    next: Buffer,
+    /// Diff state for cursor/color tracking.
+    diff_state: DiffState,
+    /// Pre-allocated output buffer.
+    output: Vec<u8>,
+    /// Terminal stdout handle.
+    stdout: Stdout,
+    /// Render statistics.
+    stats: RenderStats,
+    /// Dirty rectangles for next render.
+    dirty_rects: Vec<Rect>,
+    /// Whether a full redraw is needed.
+    needs_full_redraw: bool,
+    /// Cursor position (None = hidden).
+    cursor_x: Option<u16>,
+    cursor_y: u16,
+}
+
+impl Renderer {
+    /// Create a new renderer with the given dimensions.
+    fn new(width: u16, height: u16) -> Self {
+        let current = Buffer::new(width, height);
+        let next = Buffer::new(width, height);
+
+        Self {
+            current,
+            next,
+            diff_state: DiffState::new(),
+            output: Vec::with_capacity(65536),
+            stdout: io::stdout(),
+            stats: RenderStats::default(),
+            dirty_rects: Vec::new(),
+            needs_full_redraw: true,
+            cursor_x: None,
+            cursor_y: 0,
+        }
+    }
+
+    /// Get a mutable reference to the next buffer.
+    #[allow(dead_code)]
+    pub const fn buffer_mut(&mut self) -> &mut Buffer {
+        &mut self.next
+    }
+
+    /// Mark the entire screen as dirty.
+    const fn mark_full_dirty(&mut self) {
+        self.needs_full_redraw = true;
+    }
+
+    /// Add a dirty rectangle.
+    #[allow(dead_code)]
+    fn mark_dirty(&mut self, rect: Rect) {
+        self.dirty_rects.push(rect);
+    }
+
+    /// Perform a render cycle.
+    fn render(&mut self) -> io::Result<()> {
+        let start = Instant::now();
+        self.output.clear();
+
+        if self.needs_full_redraw {
+            // Full redraw
+            render_full(&self.next, &mut self.output);
+            self.needs_full_redraw = false;
+            self.diff_state.reset();
+        } else {
+            // Diff-based update
+            let _result = render_diff(
+                &self.current,
+                &self.next,
+                &self.dirty_rects,
+                &mut self.output,
+                &mut self.diff_state,
+            );
+        }
+
+        self.dirty_rects.clear();
+
+        // Handle cursor position
+        if let Some(x) = self.cursor_x {
+            // Show cursor at position
+            let _ = write!(
+                &mut self.output,
+                "\x1b[{};{}H\x1b[?25h",
+                self.cursor_y + 1,
+                x + 1
+            );
+        } else {
+            // Hide cursor
+            self.output.extend_from_slice(b"\x1b[?25l");
+        }
+
+        // Flush to terminal in a single write
+        if !self.output.is_empty() {
+            self.stdout.write_all(&self.output)?;
+            self.stdout.flush()?;
+        }
+
+        // Swap buffers
+        self.current.copy_from(&self.next);
+
+        // Update stats
+        let elapsed = start.elapsed();
+        self.stats.frames += 1;
+        self.stats.bytes_written += self.output.len() as u64;
+        self.stats.last_render_us = u64::try_from(elapsed.as_micros()).unwrap_or(u64::MAX);
+
+        // Smoothed average
+        if self.stats.avg_render_us == 0 {
+            self.stats.avg_render_us = self.stats.last_render_us;
+        } else {
+            self.stats.avg_render_us =
+                (self.stats.avg_render_us * 15 + self.stats.last_render_us) / 16;
+        }
+
+        Ok(())
+    }
+
+    /// Write raw bytes directly to the terminal.
+    fn write_raw(&mut self, bytes: &[u8]) -> io::Result<()> {
+        self.stdout.write_all(bytes)?;
+        self.stdout.flush()?;
+        self.stats.bytes_written += bytes.len() as u64;
+        // Invalidate ALL state (cursor, colors) since raw writes change them
+        self.diff_state.reset();
+        Ok(())
+    }
+
+    /// Resize buffers.
+    fn resize(&mut self, width: u16, height: u16) {
+        self.current.resize(width, height);
+        self.next.resize(width, height);
+        self.mark_full_dirty();
+    }
+
+    /// Set cursor position.
+    const fn set_cursor(&mut self, x: Option<u16>, y: u16) {
+        self.cursor_x = x;
+        self.cursor_y = y;
+    }
+}
+
+impl RendererActor {
+    /// Spawn the renderer actor thread.
+    ///
+    /// # Arguments
+    ///
+    /// * `receiver` - Channel to receive render commands from.
+    /// * `width` - Initial terminal width.
+    /// * `height` - Initial terminal height.
+    ///
+    /// # Returns
+    ///
+    /// The renderer actor handle.
+    #[allow(clippy::missing_panics_doc)]
+    pub fn spawn(receiver: Receiver<RenderCommand>, width: u16, height: u16) -> Self {
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let shutdown_clone = shutdown.clone();
+
+        let handle = thread::Builder::new()
+            .name("flywheel-render".to_string())
+            .spawn(move || {
+                if let Err(e) = Self::run_loop(&receiver, &shutdown_clone, width, height) {
+                    eprintln!("Render thread error: {e}");
+                }
+            })
+            .expect("Failed to spawn render thread");
+
+        Self {
+            handle: Some(handle),
+            shutdown,
+        }
+    }
+
+    /// Signal the render thread to shutdown.
+    pub fn shutdown(&self) {
+        self.shutdown.store(true, Ordering::Relaxed);
+    }
+
+    /// Wait for the render thread to finish.
+    pub fn join(mut self) {
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+
+    /// Main render loop.
+    fn run_loop(
+        receiver: &Receiver<RenderCommand>,
+        shutdown: &Arc<AtomicBool>,
+        width: u16,
+        height: u16,
+    ) -> io::Result<()> {
+        let mut renderer = Renderer::new(width, height);
+
+        loop {
+            // Check for shutdown
+            if shutdown.load(Ordering::Relaxed) {
+                break;
+            }
+
+            // Wait for command with timeout
+            if let Ok(command) = receiver.recv_timeout(Duration::from_millis(16)) {
+                match command {
+                    RenderCommand::FullRedraw(buffer) => {
+                        renderer.next = *buffer;
+                        renderer.mark_full_dirty();
+                        renderer.render()?;
+                    }
+                    RenderCommand::Update(buffer) => {
+                        renderer.next = *buffer;
+                        renderer.render()?;
+                    }
+                    RenderCommand::Resize { width, height } => {
+                        renderer.resize(width, height);
+                    }
+                    RenderCommand::SetCursor { x, y } => {
+                        renderer.set_cursor(x, y);
+                    }
+                    RenderCommand::RawOutput { bytes } => {
+                        renderer.write_raw(&bytes)?;
+                    }
+                    RenderCommand::Shutdown => {
+                        break;
+                    }
+                }
+            } else {
+                 // Timeout: loop again to check shutdown or run idle tasks
+                 // (e.g. continuous animation if we had it, but here just wait)
+            }
+        }
+
+        Ok(())
+    }
+}
+</file>
+
+<file path="src/buffer/buffer.rs">
+//! Buffer: A grid of cells representing the terminal screen.
+//!
+//! The buffer uses contiguous memory allocation for cache efficiency.
+//! Cells are stored in row-major order.
+
+use super::cell::{Cell, CellFlags, Rgb};
+use std::collections::HashMap;
+
+/// A grid of cells representing the terminal screen.
+///
+/// The buffer stores cells in a contiguous `Vec` for cache efficiency.
+/// Access is in row-major order: `index = y * width + x`.
+///
+/// # Overflow Storage
+///
+/// Complex graphemes (> 4 bytes) are stored in a separate `HashMap`.
+/// The cell contains an index into this overflow storage when the
+/// `OVERFLOW` flag is set.
+#[derive(Clone)]
+pub struct Buffer {
+    /// Contiguous cell storage (row-major order).
+    cells: Vec<Cell>,
+    /// Terminal width in columns.
+    width: u16,
+    /// Terminal height in rows.
+    height: u16,
+    /// Overflow storage for complex graphemes.
+    overflow: HashMap<u32, String>,
+    /// Next overflow index to assign.
+    next_overflow_index: u32,
+}
+
+impl Buffer {
+    /// Create a new buffer with the given dimensions.
+    ///
+    /// All cells are initialized to empty (space with default colors).
+    ///
+    /// # Panics
+    /// Panics if width or height is 0.
+    pub fn new(width: u16, height: u16) -> Self {
+        assert!(width > 0 && height > 0, "Buffer dimensions must be non-zero");
+        let size = (width as usize) * (height as usize);
+        Self {
+            cells: vec![Cell::EMPTY; size],
+            width,
+            height,
+            overflow: HashMap::new(),
+            next_overflow_index: 0,
+        }
+    }
+
+    /// Get the buffer width.
+    #[inline]
+    pub const fn width(&self) -> u16 {
+        self.width
+    }
+
+    /// Get the buffer height.
+    #[inline]
+    pub const fn height(&self) -> u16 {
+        self.height
+    }
+
+    /// Get the total number of cells.
+    #[inline]
+    pub const fn len(&self) -> usize {
+        self.cells.len()
+    }
+
+    /// Check if the buffer is empty (should never be true after construction).
+    #[inline]
+    pub const fn is_empty(&self) -> bool {
+        self.cells.is_empty()
+    }
+
+    /// Get a reference to the underlying cell slice.
+    #[inline]
+    pub fn cells(&self) -> &[Cell] {
+        &self.cells
+    }
+
+    /// Get a mutable reference to the underlying cell slice.
+    #[inline]
+    pub fn cells_mut(&mut self) -> &mut [Cell] {
+        &mut self.cells
+    }
+
+    /// Convert (x, y) coordinates to a linear index.
+    ///
+    /// Returns `None` if coordinates are out of bounds.
+    #[inline]
+    pub const fn index_of(&self, x: u16, y: u16) -> Option<usize> {
+        if x < self.width && y < self.height {
+            Some((y as usize) * (self.width as usize) + (x as usize))
+        } else {
+            None
+        }
+    }
+
+    /// Convert a linear index to (x, y) coordinates.
+    #[inline]
+    #[allow(clippy::cast_possible_truncation)]
+    pub const fn coords_of(&self, index: usize) -> Option<(u16, u16)> {
+        if index < self.cells.len() {
+            let x = (index % (self.width as usize)) as u16;
+            let y = (index / (self.width as usize)) as u16;
+            Some((x, y))
+        } else {
+            None
+        }
+    }
+
+    /// Get a reference to a cell at (x, y).
+    ///
+    /// Returns `None` if coordinates are out of bounds.
+    #[inline]
+    pub fn get(&self, x: u16, y: u16) -> Option<&Cell> {
+        self.index_of(x, y).map(|i| &self.cells[i])
+    }
+
+    /// Get a mutable reference to a cell at (x, y).
+    ///
+    /// Returns `None` if coordinates are out of bounds.
+    #[inline]
+    pub fn get_mut(&mut self, x: u16, y: u16) -> Option<&mut Cell> {
+        self.index_of(x, y).map(|i| &mut self.cells[i])
+    }
+
+    /// Set a cell at (x, y).
+    ///
+    /// Returns `false` if coordinates are out of bounds.
+    #[inline]
+    pub fn set(&mut self, x: u16, y: u16, cell: Cell) -> bool {
+        if let Some(idx) = self.index_of(x, y) {
+            self.cells[idx] = cell;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Set a grapheme at (x, y), handling overflow automatically.
+    ///
+    /// For wide characters (CJK), this also sets a continuation cell
+    /// at (x+1, y).
+    ///
+    /// Returns the display width of the grapheme, or 0 if out of bounds.
+    pub fn set_grapheme(&mut self, x: u16, y: u16, grapheme: &str, fg: Rgb, bg: Rgb) -> u8 {
+        let Some(idx) = self.index_of(x, y) else {
+            return 0;
+        };
+
+        let width = u8::try_from(unicode_width::UnicodeWidthStr::width(grapheme)).unwrap_or(1);
+
+        // Try to create an inline cell
+        let cell = if let Some(mut cell) = Cell::from_grapheme(grapheme) {
+            cell.set_fg(fg).set_bg(bg);
+            cell
+        } else {
+            // Overflow: store in HashMap
+            let overflow_idx = self.next_overflow_index;
+            self.next_overflow_index += 1;
+            self.overflow.insert(overflow_idx, grapheme.to_string());
+            Cell::overflow(overflow_idx, width).with_fg(fg).with_bg(bg)
+        };
+
+        self.cells[idx] = cell;
+
+        // Handle wide characters (CJK)
+        if width == 2
+            && let Some(next_idx) = self.index_of(x + 1, y) {
+                self.cells[next_idx] = Cell::wide_continuation().with_bg(bg);
+            }
+
+        width
+    }
+
+    /// Get the grapheme at (x, y), including overflow lookup.
+    ///
+    /// Returns `None` if out of bounds or if it's a continuation cell.
+    pub fn get_grapheme(&self, x: u16, y: u16) -> Option<&str> {
+        let cell = self.get(x, y)?;
+
+        if cell.is_wide_continuation() {
+            return None;
+        }
+
+        if cell.flags().contains(CellFlags::OVERFLOW) {
+            let idx = cell.overflow_index()?;
+            self.overflow.get(&idx).map(String::as_str)
+        } else {
+            cell.grapheme()
+        }
+    }
+
+    /// Get an overflow grapheme by its index.
+    ///
+    /// This is used by the diffing engine when rendering overflow cells.
+    #[inline]
+    pub fn get_overflow(&self, index: u32) -> Option<&str> {
+        self.overflow.get(&index).map(String::as_str)
+    }
+
+    /// Fill a rectangular region with a cell.
+    pub fn fill_rect(&mut self, x: u16, y: u16, width: u16, height: u16, cell: Cell) {
+        for row in y..(y + height).min(self.height) {
+            for col in x..(x + width).min(self.width) {
+                if let Some(idx) = self.index_of(col, row) {
+                    self.cells[idx] = cell;
+                }
+            }
+        }
+    }
+
+    /// Clear the entire buffer (fill with empty cells).
+    pub fn clear(&mut self) {
+        self.cells.fill(Cell::EMPTY);
+        self.overflow.clear();
+        self.next_overflow_index = 0;
+    }
+
+    /// Clear a rectangular region.
+    pub fn clear_rect(&mut self, x: u16, y: u16, width: u16, height: u16) {
+        self.fill_rect(x, y, width, height, Cell::EMPTY);
+    }
+
+    /// Resize the buffer, preserving content where possible.
+    ///
+    /// New cells are initialized to empty.
+    pub fn resize(&mut self, new_width: u16, new_height: u16) {
+        if new_width == self.width && new_height == self.height {
+            return;
+        }
+
+        let new_size = (new_width as usize) * (new_height as usize);
+        let mut new_cells = vec![Cell::EMPTY; new_size];
+
+        // Copy existing content
+        let copy_width = self.width.min(new_width) as usize;
+        let copy_height = self.height.min(new_height) as usize;
+
+        for y in 0..copy_height {
+            let old_start = y * (self.width as usize);
+            let new_start = y * (new_width as usize);
+            new_cells[new_start..new_start + copy_width]
+                .copy_from_slice(&self.cells[old_start..old_start + copy_width]);
+        }
+
+        self.cells = new_cells;
+        self.width = new_width;
+        self.height = new_height;
+    }
+
+    /// Copy content from another buffer.
+    ///
+    /// The buffers must have the same dimensions.
+    pub fn copy_from(&mut self, other: &Self) {
+        debug_assert_eq!(self.width, other.width);
+        debug_assert_eq!(self.height, other.height);
+        self.cells.copy_from_slice(&other.cells);
+        self.overflow.clone_from(&other.overflow);
+        self.next_overflow_index = other.next_overflow_index;
+    }
+
+    /// Swap the contents of two buffers.
+    ///
+    /// This is O(1) - just pointer swaps.
+    pub const fn swap(&mut self, other: &mut Self) {
+        std::mem::swap(&mut self.cells, &mut other.cells);
+        std::mem::swap(&mut self.width, &mut other.width);
+        std::mem::swap(&mut self.height, &mut other.height);
+        std::mem::swap(&mut self.overflow, &mut other.overflow);
+        std::mem::swap(&mut self.next_overflow_index, &mut other.next_overflow_index);
+    }
+
+    /// Get an iterator over rows.
+    pub fn rows(&self) -> impl Iterator<Item = &[Cell]> {
+        self.cells.chunks(self.width as usize)
+    }
+
+    /// Get a mutable iterator over rows.
+    pub fn rows_mut(&mut self) -> impl Iterator<Item = &mut [Cell]> {
+        self.cells.chunks_mut(self.width as usize)
+    }
+
+    /// Get memory usage in bytes (approximate).
+    pub fn memory_usage(&self) -> usize {
+        let cells_size = self.cells.len() * std::mem::size_of::<Cell>();
+        let overflow_size: usize = self.overflow.values().map(|s| s.len() + 32).sum();
+        cells_size + overflow_size + std::mem::size_of::<Self>()
+    }
+}
+
+impl std::fmt::Debug for Buffer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Buffer")
+            .field("width", &self.width)
+            .field("height", &self.height)
+            .field("overflow_count", &self.overflow.len())
+            .field("memory_bytes", &self.memory_usage())
+            .finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_buffer_new() {
+        let buffer = Buffer::new(80, 24);
+        assert_eq!(buffer.width(), 80);
+        assert_eq!(buffer.height(), 24);
+        assert_eq!(buffer.len(), 80 * 24);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_buffer_zero_width() {
+        Buffer::new(0, 24);
+    }
+
+    #[test]
+    fn test_buffer_get_set() {
+        let mut buffer = Buffer::new(80, 24);
+        let cell = Cell::new('X');
+        assert!(buffer.set(5, 10, cell));
+        assert_eq!(buffer.get(5, 10).unwrap().grapheme(), Some("X"));
+    }
+
+    #[test]
+    fn test_buffer_bounds() {
+        let buffer = Buffer::new(80, 24);
+        assert!(buffer.get(79, 23).is_some());
+        assert!(buffer.get(80, 23).is_none());
+        assert!(buffer.get(79, 24).is_none());
+    }
+
+    #[test]
+    fn test_buffer_index_coords() {
+        let buffer = Buffer::new(80, 24);
+        assert_eq!(buffer.index_of(5, 10), Some(10 * 80 + 5));
+        assert_eq!(buffer.coords_of(10 * 80 + 5), Some((5, 10)));
+    }
+
+    #[test]
+    fn test_buffer_set_grapheme() {
+        let mut buffer = Buffer::new(80, 24);
+
+        // ASCII
+        let width = buffer.set_grapheme(0, 0, "A", Rgb::WHITE, Rgb::BLACK);
+        assert_eq!(width, 1);
+        assert_eq!(buffer.get_grapheme(0, 0), Some("A"));
+
+        // CJK (wide character)
+        let width = buffer.set_grapheme(5, 0, "日", Rgb::WHITE, Rgb::BLACK);
+        assert_eq!(width, 2);
+        assert_eq!(buffer.get_grapheme(5, 0), Some("日"));
+        // Continuation cell should return None
+        assert!(buffer.get(6, 0).unwrap().is_wide_continuation());
+    }
+
+    #[test]
+    fn test_buffer_overflow() {
+        let mut buffer = Buffer::new(80, 24);
+
+        // Complex emoji (> 4 bytes UTF-8)
+        let emoji = "👨‍👩‍👧‍👦";
+        let width = buffer.set_grapheme(0, 0, emoji, Rgb::WHITE, Rgb::BLACK);
+        assert!(width > 0);
+        assert!(buffer.get(0, 0).unwrap().is_overflow());
+        assert_eq!(buffer.get_grapheme(0, 0), Some(emoji));
+    }
+
+    #[test]
+    fn test_buffer_fill_rect() {
+        let mut buffer = Buffer::new(80, 24);
+        let cell = Cell::new('X');
+        buffer.fill_rect(10, 5, 3, 2, cell);
+
+        assert_eq!(buffer.get(10, 5).unwrap().grapheme(), Some("X"));
+        assert_eq!(buffer.get(11, 5).unwrap().grapheme(), Some("X"));
+        assert_eq!(buffer.get(12, 5).unwrap().grapheme(), Some("X"));
+        assert_eq!(buffer.get(10, 6).unwrap().grapheme(), Some("X"));
+        assert_eq!(buffer.get(9, 5).unwrap().grapheme(), Some(" ")); // Outside rect
+    }
+
+    #[test]
+    fn test_buffer_clear() {
+        let mut buffer = Buffer::new(80, 24);
+        buffer.set(5, 5, Cell::new('X'));
+        buffer.clear();
+        assert_eq!(buffer.get(5, 5), Some(&Cell::EMPTY));
+    }
+
+    #[test]
+    fn test_buffer_resize() {
+        let mut buffer = Buffer::new(80, 24);
+        buffer.set(5, 5, Cell::new('X'));
+
+        buffer.resize(100, 30);
+        assert_eq!(buffer.width(), 100);
+        assert_eq!(buffer.height(), 30);
+        assert_eq!(buffer.get(5, 5).unwrap().grapheme(), Some("X")); // Preserved
+
+        buffer.resize(10, 10);
+        assert_eq!(buffer.get(5, 5).unwrap().grapheme(), Some("X")); // Still preserved
+        assert!(buffer.get(15, 15).is_none()); // Out of bounds now
+    }
+
+    #[test]
+    fn test_buffer_swap() {
+        let mut a = Buffer::new(80, 24);
+        let mut b = Buffer::new(80, 24);
+
+        a.set(0, 0, Cell::new('A'));
+        b.set(0, 0, Cell::new('B'));
+
+        a.swap(&mut b);
+
+        assert_eq!(a.get(0, 0).unwrap().grapheme(), Some("B"));
+        assert_eq!(b.get(0, 0).unwrap().grapheme(), Some("A"));
+    }
+
+    #[test]
+    fn test_buffer_memory_usage() {
+        let buffer = Buffer::new(200, 50);
+        let usage = buffer.memory_usage();
+        // 200 * 50 * 16 = 160,000 bytes for cells, plus overhead
+        assert!(usage >= 160_000);
+        assert!(usage < 200_000); // Shouldn't be too much more
+    }
+}
+</file>
+
+<file path="src/buffer/cell.rs">
+//! Cell: The atomic unit of terminal display.
+//!
+//! # Memory Layout
+//!
+//! The `Cell` struct is carefully designed for cache efficiency:
+//! - 16 bytes total, allowing 4 cells per cache line (64 bytes)
+//! - Inline grapheme storage covers 99%+ of real-world characters
+//! - Complex graphemes (emoji ZWJ sequences) spill to an external `HashMap`
+//!
+//! ```text
+//! ┌───────────────────────────────────────────────────────────────────────────┐
+//! │  Cell Layout (16 bytes)                                                   │
+//! ├─────────────┬─────────────┬───────────┬───────────┬─────┬───────┬─────────┤
+//! │  grapheme   │  len + width│    fg     │    bg     │ mod │ flags │ padding │
+//! │  [u8; 4]    │  u8 + u8    │  [u8; 3]  │  [u8; 3]  │ u8  │  u8   │ [u8; 2] │
+//! │  4 bytes    │  2 bytes    │  3 bytes  │  3 bytes  │ 1b  │  1b   │  2 b    │
+//! └─────────────┴─────────────┴───────────┴───────────┴─────┴───────┴─────────┘
+//! ```
+
+use bitflags::bitflags;
+use std::hash::{Hash, Hasher};
+
+/// True-color RGB representation.
+///
+/// Uses 3 bytes for 24-bit color depth, supporting 16.7 million colors.
+/// This is essential for precise brand colors in commercial applications.
+#[repr(C)]
+#[derive(Clone, Copy, PartialEq, Eq, Default, Hash)]
+pub struct Rgb {
+    /// Red channel (0-255)
+    pub r: u8,
+    /// Green channel (0-255)
+    pub g: u8,
+    /// Blue channel (0-255)
+    pub b: u8,
+}
+
+impl Rgb {
+    /// Create a new RGB color.
+    #[inline]
+    pub const fn new(r: u8, g: u8, b: u8) -> Self {
+        Self { r, g, b }
+    }
+
+    /// Black (0, 0, 0)
+    pub const BLACK: Self = Self::new(0, 0, 0);
+    /// White (255, 255, 255)
+    pub const WHITE: Self = Self::new(255, 255, 255);
+    /// Default foreground (white)
+    pub const DEFAULT_FG: Self = Self::WHITE;
+    /// Default background (black)
+    pub const DEFAULT_BG: Self = Self::BLACK;
+
+    /// Create from a 24-bit hex color (e.g., 0xFF5500).
+    #[inline]
+    pub const fn from_u32(hex: u32) -> Self {
+        Self::new(
+            ((hex >> 16) & 0xFF) as u8,
+            ((hex >> 8) & 0xFF) as u8,
+            (hex & 0xFF) as u8,
+        )
+    }
+}
+
+impl std::fmt::Debug for Rgb {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "#{:02x}{:02x}{:02x}", self.r, self.g, self.b)
+    }
+}
+
+impl From<(u8, u8, u8)> for Rgb {
+    #[inline]
+    fn from((r, g, b): (u8, u8, u8)) -> Self {
+        Self::new(r, g, b)
+    }
+}
+
+impl From<u32> for Rgb {
+    /// Convert from a 24-bit hex color (e.g., 0xFF5500)
+    #[inline]
+    fn from(hex: u32) -> Self {
+        Self::new(
+            ((hex >> 16) & 0xFF) as u8,
+            ((hex >> 8) & 0xFF) as u8,
+            (hex & 0xFF) as u8,
+        )
+    }
+}
+
+bitflags! {
+    /// Text style modifiers.
+    ///
+    /// These can be combined using bitwise OR.
+    ///
+    /// # Example
+    /// ```
+    /// use flywheel::Modifiers;
+    /// let style = Modifiers::BOLD | Modifiers::ITALIC;
+    /// ```
+    #[derive(Clone, Copy, PartialEq, Eq, Hash, Default)]
+    pub struct Modifiers: u8 {
+        /// Bold text
+        const BOLD = 0b0000_0001;
+        /// Dim/faint text
+        const DIM = 0b0000_0010;
+        /// Italic text
+        const ITALIC = 0b0000_0100;
+        /// Underlined text
+        const UNDERLINE = 0b0000_1000;
+        /// Blinking text
+        const BLINK = 0b0001_0000;
+        /// Reversed colors (fg/bg swapped)
+        const REVERSED = 0b0010_0000;
+        /// Hidden/invisible text
+        const HIDDEN = 0b0100_0000;
+        /// Strikethrough text
+        const STRIKETHROUGH = 0b1000_0000;
+    }
+}
+
+impl std::fmt::Debug for Modifiers {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        bitflags::parser::to_writer(self, f)
+    }
+}
+
+bitflags! {
+    /// Cell-level flags for special states.
+    #[derive(Clone, Copy, PartialEq, Eq, Hash, Default)]
+    pub struct CellFlags: u8 {
+        /// Grapheme overflows inline storage; check overflow HashMap
+        const OVERFLOW = 0b0000_0001;
+        /// Cell has been modified since last render
+        const DIRTY = 0b0000_0010;
+        /// This cell is a continuation of a wide character
+        const WIDE_CONTINUATION = 0b0000_0100;
+    }
+}
+
+impl std::fmt::Debug for CellFlags {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        bitflags::parser::to_writer(self, f)
+    }
+}
+
+/// A single terminal cell.
+///
+/// This is the atomic unit of display in Flywheel. Each cell contains:
+/// - A grapheme (the character to display)
+/// - Foreground and background colors
+/// - Text modifiers (bold, italic, etc.)
+///
+/// # Memory Layout
+///
+/// The struct is carefully laid out to be exactly 16 bytes:
+/// - 4 bytes for inline grapheme storage
+/// - 2 bytes for grapheme metadata (length + display width)
+/// - 6 bytes for colors (3 bytes fg + 3 bytes bg)
+/// - 1 byte for modifiers
+/// - 1 byte for flags
+/// - 2 bytes padding (power-of-2 alignment)
+///
+/// # Grapheme Handling
+///
+/// Most characters (ASCII, Latin, CJK) fit within the 4-byte inline storage.
+/// For complex graphemes like emoji ZWJ sequences (👨‍👩‍👧‍👦), we set the
+/// `OVERFLOW` flag and store an index in the grapheme bytes that points
+/// to an external overflow storage.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct Cell {
+    /// Inline grapheme storage (UTF-8 bytes).
+    /// For overflowed graphemes, this contains a u32 index.
+    grapheme: [u8; 4],
+    /// Actual byte length of the grapheme (0-4, or 0 if overflowed).
+    grapheme_len: u8,
+    /// Display width of the grapheme (0=continuation, 1=normal, 2=wide CJK).
+    display_width: u8,
+    /// Foreground color.
+    fg: Rgb,
+    /// Background color.
+    bg: Rgb,
+    /// Text modifiers (bold, italic, etc.).
+    modifiers: Modifiers,
+    /// Cell flags (overflow, dirty, etc.).
+    flags: CellFlags,
+    /// Padding to reach 16 bytes (power of 2, cache-friendly).
+    _padding: [u8; 2],
+}
+
+// Compile-time assertion: Cell must be exactly 16 bytes
+const _: () = assert!(
+    std::mem::size_of::<Cell>() == 16,
+    "Cell must be exactly 16 bytes for cache efficiency"
+);
+
+impl Default for Cell {
+    fn default() -> Self {
+        Self::EMPTY
+    }
+}
+
+impl Cell {
+    /// An empty cell (space character with default colors).
+    pub const EMPTY: Self = Self {
+        grapheme: [b' ', 0, 0, 0],
+        grapheme_len: 1,
+        display_width: 1,
+        fg: Rgb::DEFAULT_FG,
+        bg: Rgb::DEFAULT_BG,
+        modifiers: Modifiers::empty(),
+        flags: CellFlags::empty(),
+        _padding: [0, 0],
+    };
+
+    /// Create a new cell with a single ASCII character.
+    ///
+    /// # Panics
+    /// Panics if the character is not ASCII.
+    #[inline]
+    pub fn new(c: char) -> Self {
+        debug_assert!(c.is_ascii(), "Use Cell::from_char for non-ASCII");
+        Self {
+            grapheme: [c as u8, 0, 0, 0],
+            grapheme_len: 1,
+            display_width: 1,
+            fg: Rgb::DEFAULT_FG,
+            bg: Rgb::DEFAULT_BG,
+            modifiers: Modifiers::empty(),
+            flags: CellFlags::empty(),
+            _padding: [0, 0],
+        }
+    }
+
+    /// Create a cell from any character.
+    ///
+    /// Returns `None` if the character's UTF-8 encoding exceeds 4 bytes
+    /// (which never happens for a single `char`, but may happen for
+    /// grapheme clusters when using `from_grapheme`).
+    #[inline]
+    #[allow(clippy::missing_panics_doc)]
+    pub fn from_char(c: char) -> Self {
+        let mut grapheme = [0u8; 4];
+        let s = c.encode_utf8(&mut grapheme);
+        let len = u8::try_from(s.len()).unwrap();
+        let width = u8::try_from(unicode_width::UnicodeWidthChar::width(c).unwrap_or(0)).unwrap();
+
+        Self {
+            grapheme,
+            grapheme_len: len,
+            display_width: width,
+            fg: Rgb::DEFAULT_FG,
+            bg: Rgb::DEFAULT_BG,
+            modifiers: Modifiers::empty(),
+            flags: CellFlags::empty(),
+            _padding: [0, 0],
+        }
+    }
+
+    /// Create a cell from a grapheme string.
+    ///
+    /// If the grapheme fits in 4 bytes, it's stored inline.
+    /// Otherwise, returns `None` and the caller should use overflow storage.
+    #[inline]
+    #[allow(clippy::missing_panics_doc)]
+    pub fn from_grapheme(s: &str) -> Option<Self> {
+        let bytes = s.as_bytes();
+        if bytes.len() > 4 {
+            // Caller needs to handle overflow
+            return None;
+        }
+
+        let mut grapheme = [0u8; 4];
+        grapheme[..bytes.len()].copy_from_slice(bytes);
+        let width = u8::try_from(unicode_width::UnicodeWidthStr::width(s)).unwrap_or(1);
+
+        Some(Self {
+            grapheme,
+            grapheme_len: u8::try_from(bytes.len()).unwrap(),
+            display_width: width,
+            fg: Rgb::DEFAULT_FG,
+            bg: Rgb::DEFAULT_BG,
+            modifiers: Modifiers::empty(),
+            flags: CellFlags::empty(),
+            _padding: [0, 0],
+        })
+    }
+
+    /// Create an overflow cell with an index to external storage.
+    ///
+    /// The index is stored in the grapheme bytes as a little-endian u32.
+    #[inline]
+    pub const fn overflow(index: u32, display_width: u8) -> Self {
+        Self {
+            grapheme: index.to_le_bytes(),
+            grapheme_len: 0, // Indicates overflow
+            display_width,
+            fg: Rgb::DEFAULT_FG,
+            bg: Rgb::DEFAULT_BG,
+            modifiers: Modifiers::empty(),
+            flags: CellFlags::OVERFLOW,
+            _padding: [0, 0],
+        }
+    }
+
+    /// Create a wide-character continuation cell.
+    ///
+    /// This is placed after a wide CJK character that takes 2 columns.
+    #[inline]
+    pub const fn wide_continuation() -> Self {
+        Self {
+            grapheme: [0, 0, 0, 0],
+            grapheme_len: 0,
+            display_width: 0,
+            fg: Rgb::DEFAULT_FG,
+            bg: Rgb::DEFAULT_BG,
+            modifiers: Modifiers::empty(),
+            flags: CellFlags::WIDE_CONTINUATION,
+            _padding: [0, 0],
+        }
+    }
+
+    /// Get the grapheme as a string slice.
+    ///
+    /// Returns `None` if this is an overflow cell (caller should check `is_overflow()`
+    /// and look up the grapheme in the overflow storage).
+    #[inline]
+    #[allow(unsafe_code)]
+    pub fn grapheme(&self) -> Option<&str> {
+        if self.flags.contains(CellFlags::OVERFLOW) {
+            return None;
+        }
+        // SAFETY: We only store valid UTF-8 in the grapheme bytes
+        Some(unsafe {
+            std::str::from_utf8_unchecked(&self.grapheme[..self.grapheme_len as usize])
+        })
+    }
+
+    /// Get the overflow index if this is an overflow cell.
+    #[inline]
+    pub const fn overflow_index(&self) -> Option<u32> {
+        if self.flags.contains(CellFlags::OVERFLOW) {
+            Some(u32::from_le_bytes(self.grapheme))
+        } else {
+            None
+        }
+    }
+
+    /// Check if this cell uses overflow storage.
+    #[inline]
+    pub const fn is_overflow(&self) -> bool {
+        self.flags.contains(CellFlags::OVERFLOW)
+    }
+
+    /// Check if this is a wide-character continuation.
+    #[inline]
+    pub const fn is_wide_continuation(&self) -> bool {
+        self.flags.contains(CellFlags::WIDE_CONTINUATION)
+    }
+
+    /// Get the display width (0, 1, or 2).
+    #[inline]
+    pub const fn display_width(&self) -> u8 {
+        self.display_width
+    }
+
+    /// Get the foreground color.
+    #[inline]
+    pub const fn fg(&self) -> Rgb {
+        self.fg
+    }
+
+    /// Get the background color.
+    #[inline]
+    pub const fn bg(&self) -> Rgb {
+        self.bg
+    }
+
+    /// Get the modifiers.
+    #[inline]
+    pub const fn modifiers(&self) -> Modifiers {
+        self.modifiers
+    }
+
+    /// Get the flags.
+    #[inline]
+    pub const fn flags(&self) -> CellFlags {
+        self.flags
+    }
+
+    /// Set the foreground color.
+    #[inline]
+    pub const fn set_fg(&mut self, fg: Rgb) -> &mut Self {
+        self.fg = fg;
+        self
+    }
+
+    /// Set the background color.
+    #[inline]
+    pub const fn set_bg(&mut self, bg: Rgb) -> &mut Self {
+        self.bg = bg;
+        self
+    }
+
+    /// Set the modifiers.
+    #[inline]
+    pub const fn set_modifiers(&mut self, modifiers: Modifiers) -> &mut Self {
+        self.modifiers = modifiers;
+        self
+    }
+
+    /// Set the foreground color (builder pattern).
+    #[inline]
+    #[must_use]
+    pub const fn with_fg(mut self, fg: Rgb) -> Self {
+        self.fg = fg;
+        self
+    }
+
+    /// Set the background color (builder pattern).
+    #[inline]
+    #[must_use]
+    pub const fn with_bg(mut self, bg: Rgb) -> Self {
+        self.bg = bg;
+        self
+    }
+
+    /// Set the modifiers (builder pattern).
+    #[inline]
+    #[must_use]
+    pub const fn with_modifiers(mut self, modifiers: Modifiers) -> Self {
+        self.modifiers = modifiers;
+        self
+    }
+
+    /// Reset the cell to empty (space with default colors).
+    #[inline]
+    pub const fn reset(&mut self) {
+        *self = Self::EMPTY;
+    }
+}
+
+impl PartialEq for Cell {
+    /// Optimized equality check.
+    ///
+    /// We compare in order of most likely difference:
+    /// 1. Grapheme bytes (most frequently changing)
+    /// 2. Colors (next most common)
+    /// 3. Modifiers and flags (rarely differ)
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        // Fast path: compare grapheme first (most likely to differ)
+        self.grapheme == other.grapheme
+            && self.grapheme_len == other.grapheme_len
+            && self.fg == other.fg
+            && self.bg == other.bg
+            && self.modifiers == other.modifiers
+            && self.flags == other.flags
+            && self.display_width == other.display_width
+    }
+}
+
+impl Eq for Cell {}
+
+impl Hash for Cell {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.grapheme.hash(state);
+        self.grapheme_len.hash(state);
+        self.display_width.hash(state);
+        self.fg.hash(state);
+        self.bg.hash(state);
+        self.modifiers.hash(state);
+        self.flags.hash(state);
+    }
+}
+
+impl std::fmt::Debug for Cell {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let grapheme = self.grapheme().unwrap_or("<overflow>");
+        f.debug_struct("Cell")
+            .field("grapheme", &grapheme)
+            .field("width", &self.display_width)
+            .field("fg", &self.fg)
+            .field("bg", &self.bg)
+            .field("modifiers", &self.modifiers)
+            .field("flags", &self.flags)
+            .finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cell_size() {
+        assert_eq!(std::mem::size_of::<Cell>(), 16);
+    }
+
+    #[test]
+    fn test_rgb_from_tuple() {
+        let rgb: Rgb = (255, 128, 0).into();
+        assert_eq!(rgb.r, 255);
+        assert_eq!(rgb.g, 128);
+        assert_eq!(rgb.b, 0);
+    }
+
+    #[test]
+    fn test_rgb_from_hex() {
+        let rgb: Rgb = 0xFF8000.into();
+        assert_eq!(rgb.r, 255);
+        assert_eq!(rgb.g, 128);
+        assert_eq!(rgb.b, 0);
+    }
+
+    #[test]
+    fn test_cell_new_ascii() {
+        let cell = Cell::new('A');
+        assert_eq!(cell.grapheme(), Some("A"));
+        assert_eq!(cell.display_width(), 1);
+    }
+
+    #[test]
+    fn test_cell_from_char_unicode() {
+        let cell = Cell::from_char('日');
+        assert_eq!(cell.grapheme(), Some("日"));
+        assert_eq!(cell.display_width(), 2); // CJK is double-width
+    }
+
+    #[test]
+    fn test_cell_from_grapheme_fits() {
+        let cell = Cell::from_grapheme("é").unwrap();
+        assert_eq!(cell.grapheme(), Some("é"));
+        assert_eq!(cell.display_width(), 1);
+    }
+
+    #[test]
+    fn test_cell_from_grapheme_overflow() {
+        // This emoji ZWJ sequence is > 4 bytes
+        let result = Cell::from_grapheme("👨‍👩‍👧");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_cell_overflow() {
+        let cell = Cell::overflow(42, 2);
+        assert!(cell.is_overflow());
+        assert_eq!(cell.overflow_index(), Some(42));
+        assert_eq!(cell.grapheme(), None);
+    }
+
+    #[test]
+    fn test_cell_equality() {
+        let a = Cell::new('A').with_fg(Rgb::new(255, 0, 0));
+        let b = Cell::new('A').with_fg(Rgb::new(255, 0, 0));
+        let c = Cell::new('A').with_fg(Rgb::new(0, 255, 0));
+
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+    }
+
+    #[test]
+    fn test_cell_builder_pattern() {
+        let cell = Cell::new('X')
+            .with_fg(Rgb::new(255, 0, 0))
+            .with_bg(Rgb::new(0, 0, 255))
+            .with_modifiers(Modifiers::BOLD | Modifiers::ITALIC);
+
+        assert_eq!(cell.fg(), Rgb::new(255, 0, 0));
+        assert_eq!(cell.bg(), Rgb::new(0, 0, 255));
+        assert!(cell.modifiers().contains(Modifiers::BOLD));
+        assert!(cell.modifiers().contains(Modifiers::ITALIC));
+    }
+
+    #[test]
+    fn test_modifiers_bitflags() {
+        let mods = Modifiers::BOLD | Modifiers::UNDERLINE;
+        assert!(mods.contains(Modifiers::BOLD));
+        assert!(mods.contains(Modifiers::UNDERLINE));
+        assert!(!mods.contains(Modifiers::ITALIC));
+    }
+
+    #[test]
+    fn test_cell_reset() {
+        let mut cell = Cell::new('X').with_fg(Rgb::new(255, 0, 0));
+        cell.reset();
+        assert_eq!(cell, Cell::EMPTY);
+    }
+
+    #[test]
+    fn test_wide_continuation() {
+        let cont = Cell::wide_continuation();
+        assert!(cont.is_wide_continuation());
+        assert_eq!(cont.display_width(), 0);
+    }
+}
+</file>
+
+<file path="src/buffer/diff.rs">
+//! Diffing Engine: Generate minimal ANSI sequences from buffer changes.
+//!
+//! This module implements the core anti-flicker logic:
+//! 1. Compare Current and Next buffers
+//! 2. Generate minimal ANSI escape sequences for changed cells
+//! 3. Optimize cursor movements (skip if adjacent)
+//! 4. Track color state to avoid redundant SGR sequences
+//!
+//! All output is accumulated in a single buffer and flushed with one syscall.
+
+use super::{Buffer, Cell, CellFlags, Modifiers, Rgb};
+use crate::layout::Rect;
+use std::io::Write;
+
+/// State tracker for the diffing algorithm.
+///
+/// This tracks the "current" terminal state (cursor position, colors, modifiers)
+/// to minimize the number of escape sequences we need to emit.
+#[derive(Debug, Clone)]
+pub struct DiffState {
+    /// Last known cursor X position (0-indexed).
+    cursor_x: u16,
+    /// Last known cursor Y position (0-indexed).
+    cursor_y: u16,
+    /// Last emitted foreground color.
+    fg: Option<Rgb>,
+    /// Last emitted background color.
+    bg: Option<Rgb>,
+    /// Last emitted modifiers.
+    modifiers: Option<Modifiers>,
+}
+
+impl Default for DiffState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl DiffState {
+    /// Create a new diff state with unknown terminal state.
+    pub const fn new() -> Self {
+        Self {
+            cursor_x: 0,
+            cursor_y: 0,
+            fg: None,
+            bg: None,
+            modifiers: None,
+        }
+    }
+
+    /// Reset the state (e.g., after a full screen clear).
+    pub const fn reset(&mut self) {
+        self.fg = None;
+        self.bg = None;
+        self.modifiers = None;
+        // Force cursor move on next write
+        self.cursor_x = u16::MAX;
+        self.cursor_y = u16::MAX;
+    }
+}
+
+/// Result of a diff operation.
+#[derive(Debug, Clone, Default)]
+pub struct DiffResult {
+    /// Number of cells that were different.
+    pub cells_changed: usize,
+    /// Number of cursor move sequences emitted.
+    pub cursor_moves: usize,
+    /// Number of color change sequences emitted.
+    pub color_changes: usize,
+    /// Number of modifier change sequences emitted.
+    pub modifier_changes: usize,
+}
+
+/// Render the difference between two buffers into an ANSI sequence buffer.
+///
+/// This is the core diffing function. It compares `current` and `next` buffers,
+/// generating minimal ANSI escape sequences for only the cells that changed.
+///
+/// # Optimizations
+///
+/// 1. **Cursor movement**: Skips explicit moves when writing adjacent cells
+/// 2. **Color tracking**: Only emits color changes when fg/bg actually differ
+/// 3. **Modifier tracking**: Only emits modifier changes when needed
+/// 4. **Dirty rectangles**: Only iterates over specified dirty regions
+///
+/// # Arguments
+///
+/// * `current` - The currently displayed buffer
+/// * `next` - The buffer to transition to
+/// * `dirty_rects` - Regions to check for changes (empty = full buffer)
+/// * `output` - Buffer to write ANSI sequences to
+/// * `state` - Mutable state tracking cursor/color positions
+///
+/// # Returns
+///
+/// Statistics about the diff operation.
+pub fn render_diff(
+    current: &Buffer,
+    next: &Buffer,
+    dirty_rects: &[Rect],
+    output: &mut Vec<u8>,
+    state: &mut DiffState,
+) -> DiffResult {
+    debug_assert_eq!(current.width(), next.width());
+    debug_assert_eq!(current.height(), next.height());
+
+    let mut result = DiffResult::default();
+    let width = current.width();
+    let height = current.height();
+
+    // If no dirty rects specified, diff the entire buffer
+    let full_rect = Rect::from_size(width, height);
+    let rects: &[Rect] = if dirty_rects.is_empty() {
+        std::slice::from_ref(&full_rect)
+    } else {
+        dirty_rects
+    };
+
+    for rect in rects {
+        diff_rect(current, next, *rect, output, state, &mut result);
+    }
+
+    result
+}
+
+/// Diff a single rectangular region.
+fn diff_rect(
+    current: &Buffer,
+    next: &Buffer,
+    rect: Rect,
+    output: &mut Vec<u8>,
+    state: &mut DiffState,
+    result: &mut DiffResult,
+) {
+    let width = current.width();
+
+    // Clamp rect to buffer bounds
+    let x_end = (rect.x + rect.width).min(width);
+    let y_end = (rect.y + rect.height).min(current.height());
+
+    for y in rect.y..y_end {
+        for x in rect.x..x_end {
+            let idx = (y as usize) * (width as usize) + (x as usize);
+            let current_cell = &current.cells()[idx];
+            let next_cell = &next.cells()[idx];
+
+            // Skip if cells are identical
+            if current_cell == next_cell {
+                continue;
+            }
+
+            // Skip wide-character continuation cells (handled by the main cell)
+            if next_cell.is_wide_continuation() {
+                continue;
+            }
+
+            result.cells_changed += 1;
+
+            // Emit cursor move if not adjacent to last position
+            if state.cursor_y != y || state.cursor_x != x {
+                emit_cursor_move(output, x, y);
+                state.cursor_x = x;
+                state.cursor_y = y;
+                result.cursor_moves += 1;
+            }
+
+            // Handle modifier resets first
+            // If we need to disable any modifiers, we must emit a full reset (\x1b[0m)
+            // which also clears colors.
+            let next_mods = next_cell.modifiers();
+            let current_mods = state.modifiers.unwrap_or(Modifiers::empty());
+            let removed_mods = current_mods.difference(next_mods);
+
+            if !removed_mods.is_empty() {
+                output.extend_from_slice(b"\x1b[0m");
+                state.fg = None;
+                state.bg = None;
+                state.modifiers = None;
+            }
+
+            // Emit color changes if needed
+            if state.fg != Some(next_cell.fg()) {
+                emit_fg_color(output, next_cell.fg());
+                state.fg = Some(next_cell.fg());
+                result.color_changes += 1;
+            }
+
+            if state.bg != Some(next_cell.bg()) {
+                emit_bg_color(output, next_cell.bg());
+                state.bg = Some(next_cell.bg());
+                result.color_changes += 1;
+            }
+
+            // Emit modifier additions if needed
+            if state.modifiers != Some(next_mods) {
+                // Logic here only handles additions because we already handled removals
+                // (if any removal occurred, we reset state.modifiers to None)
+                emit_modifiers(output, next_mods, state.modifiers);
+                state.modifiers = Some(next_mods);
+                result.modifier_changes += 1;
+            }
+
+            // Emit the grapheme
+            emit_grapheme(output, next_cell, next);
+
+            // Update cursor position (advances by display width)
+            let advance = u16::from(next_cell.display_width().max(1));
+            state.cursor_x += advance;
+        }
+    }
+}
+
+/// Emit a cursor move sequence.
+///
+/// Uses the most compact representation:
+/// - `\x1b[H` for home (1,1)
+/// - `\x1b[{row};{col}H` for absolute positioning
+#[inline]
+fn emit_cursor_move(output: &mut Vec<u8>, x: u16, y: u16) {
+    // ANSI uses 1-indexed positions
+    let row = y + 1;
+    let col = x + 1;
+
+    if row == 1 && col == 1 {
+        output.extend_from_slice(b"\x1b[H");
+    } else if col == 1 {
+        // Move to column 1 of row N
+        let _ = write!(output, "\x1b[{row}H");
+    } else {
+        let _ = write!(output, "\x1b[{row};{col}H");
+    }
+}
+
+/// Emit a foreground color sequence (true color).
+#[inline]
+fn emit_fg_color(output: &mut Vec<u8>, color: Rgb) {
+    let _ = write!(output, "\x1b[38;2;{};{};{}m", color.r, color.g, color.b);
+}
+
+/// Emit a background color sequence (true color).
+#[inline]
+fn emit_bg_color(output: &mut Vec<u8>, color: Rgb) {
+    let _ = write!(output, "\x1b[48;2;{};{};{}m", color.r, color.g, color.b);
+}
+
+/// Emit modifier change sequences.
+///
+/// This handles the transition from one set of modifiers to another,
+/// emitting reset + set sequences as needed.
+fn emit_modifiers(output: &mut Vec<u8>, new: Modifiers, old: Option<Modifiers>) {
+    let old = old.unwrap_or(Modifiers::empty());
+
+    // If we're removing modifiers, we need to reset first
+    let removed = old.difference(new);
+    if removed.is_empty() {
+        // Only adding modifiers, no need to reset
+        let added = new.difference(old);
+        emit_modifier_set(output, added);
+    } else {
+        // Reset all attributes, then re-apply what we want
+        output.extend_from_slice(b"\x1b[0m");
+        // Note: After reset, colors are also reset, so caller should
+        // re-emit colors. For now, we emit all new modifiers.
+        emit_modifier_set(output, new);
+    }
+}
+
+/// Emit SGR sequences for a set of modifiers.
+fn emit_modifier_set(output: &mut Vec<u8>, modifiers: Modifiers) {
+    if modifiers.contains(Modifiers::BOLD) {
+        output.extend_from_slice(b"\x1b[1m");
+    }
+    if modifiers.contains(Modifiers::DIM) {
+        output.extend_from_slice(b"\x1b[2m");
+    }
+    if modifiers.contains(Modifiers::ITALIC) {
+        output.extend_from_slice(b"\x1b[3m");
+    }
+    if modifiers.contains(Modifiers::UNDERLINE) {
+        output.extend_from_slice(b"\x1b[4m");
+    }
+    if modifiers.contains(Modifiers::BLINK) {
+        output.extend_from_slice(b"\x1b[5m");
+    }
+    if modifiers.contains(Modifiers::REVERSED) {
+        output.extend_from_slice(b"\x1b[7m");
+    }
+    if modifiers.contains(Modifiers::HIDDEN) {
+        output.extend_from_slice(b"\x1b[8m");
+    }
+    if modifiers.contains(Modifiers::STRIKETHROUGH) {
+        output.extend_from_slice(b"\x1b[9m");
+    }
+}
+
+/// Emit a grapheme to the output buffer.
+#[inline]
+fn emit_grapheme(output: &mut Vec<u8>, cell: &Cell, buffer: &Buffer) {
+    if cell.flags().contains(CellFlags::OVERFLOW) {
+        // Look up in overflow storage
+        if let Some(idx) = cell.overflow_index()
+            && let Some(grapheme) = buffer.get_overflow(idx) {
+                output.extend_from_slice(grapheme.as_bytes());
+                return;
+            }
+        // Fallback: emit a replacement character
+        output.extend_from_slice("�".as_bytes());
+    } else if let Some(grapheme) = cell.grapheme() {
+        output.extend_from_slice(grapheme.as_bytes());
+    } else {
+        // Empty cell, emit space
+        output.push(b' ');
+    }
+}
+
+/// Perform a full buffer diff (convenience function).
+///
+/// This diffs the entire buffer without dirty rect optimization.
+pub fn render_full_diff(
+    current: &Buffer,
+    next: &Buffer,
+    output: &mut Vec<u8>,
+    state: &mut DiffState,
+) -> DiffResult {
+    render_diff(current, next, &[], output, state)
+}
+
+/// Generate a full redraw sequence (no diffing).
+///
+/// This is used for initial render or when the terminal state is unknown.
+pub fn render_full(buffer: &Buffer, output: &mut Vec<u8>) {
+    let width = buffer.width();
+    let height = buffer.height();
+
+    // Hide cursor during redraw
+    output.extend_from_slice(b"\x1b[?25l");
+
+    // Move to home
+    output.extend_from_slice(b"\x1b[H");
+
+    let mut last_fg: Option<Rgb> = None;
+    let mut last_bg: Option<Rgb> = None;
+    let mut last_mods: Option<Modifiers> = None;
+
+    for y in 0..height {
+        if y > 0 {
+            // Move to start of next line
+            output.extend_from_slice(b"\r\n");
+        }
+
+        for x in 0..width {
+            let idx = (y as usize) * (width as usize) + (x as usize);
+            let cell = &buffer.cells()[idx];
+
+            // Skip continuation cells
+            if cell.is_wide_continuation() {
+                continue;
+            }
+
+            // Emit colors if changed
+            if last_fg != Some(cell.fg()) {
+                emit_fg_color(output, cell.fg());
+                last_fg = Some(cell.fg());
+            }
+            if last_bg != Some(cell.bg()) {
+                emit_bg_color(output, cell.bg());
+                last_bg = Some(cell.bg());
+            }
+            if last_mods != Some(cell.modifiers()) {
+                emit_modifiers(output, cell.modifiers(), last_mods);
+                last_mods = Some(cell.modifiers());
+            }
+
+            emit_grapheme(output, cell, buffer);
+        }
+    }
+
+    // Reset attributes and show cursor
+    output.extend_from_slice(b"\x1b[0m\x1b[?25h");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_diff_identical_buffers() {
+        let a = Buffer::new(10, 5);
+        let b = Buffer::new(10, 5);
+        let mut output = Vec::new();
+        let mut state = DiffState::new();
+
+        let result = render_full_diff(&a, &b, &mut output, &mut state);
+
+        assert_eq!(result.cells_changed, 0);
+        assert!(output.is_empty());
+    }
+
+    #[test]
+    fn test_diff_single_cell_change() {
+        let a = Buffer::new(10, 5);
+        let mut b = Buffer::new(10, 5);
+
+        b.set(5, 2, Cell::new('X'));
+
+        let mut output = Vec::new();
+        let mut state = DiffState::new();
+
+        let result = render_full_diff(&a, &b, &mut output, &mut state);
+
+        assert_eq!(result.cells_changed, 1);
+        assert!(!output.is_empty());
+        // Should contain cursor move and the character
+        let output_str = String::from_utf8_lossy(&output);
+        assert!(output_str.contains('X'));
+    }
+
+    #[test]
+    fn test_diff_adjacent_cells_no_cursor_move() {
+        let a = Buffer::new(10, 5);
+        let mut b = Buffer::new(10, 5);
+
+        // Three adjacent cells on same row
+        b.set(0, 0, Cell::new('A'));
+        b.set(1, 0, Cell::new('B'));
+        b.set(2, 0, Cell::new('C'));
+
+        let mut output = Vec::new();
+        let mut state = DiffState::new();
+
+        let result = render_full_diff(&a, &b, &mut output, &mut state);
+
+        assert_eq!(result.cells_changed, 3);
+        // No cursor moves needed: cursor starts at (0,0) and cells are adjacent
+        assert_eq!(result.cursor_moves, 0);
+    }
+
+    #[test]
+    fn test_diff_color_tracking() {
+        let a = Buffer::new(10, 5);
+        let mut b = Buffer::new(10, 5);
+
+        let red = Rgb::new(255, 0, 0);
+        // Both cells have same fg color, but will also emit bg color first time
+        b.set(0, 0, Cell::new('A').with_fg(red));
+        b.set(1, 0, Cell::new('B').with_fg(red)); // Same colors, no additional changes
+
+        let mut output = Vec::new();
+        let mut state = DiffState::new();
+
+        let result = render_full_diff(&a, &b, &mut output, &mut state);
+
+        // Two color changes for first cell (fg and bg), none for second (same colors)
+        assert_eq!(result.color_changes, 2);
+    }
+
+    #[test]
+    fn test_diff_dirty_rect() {
+        let a = Buffer::new(20, 10);
+        let mut b = Buffer::new(20, 10);
+
+        // Changes outside dirty rect
+        b.set(0, 0, Cell::new('X'));
+
+        // Changes inside dirty rect
+        b.set(10, 5, Cell::new('Y'));
+
+        let mut output = Vec::new();
+        let mut state = DiffState::new();
+
+        // Only diff a region that includes (10,5) but not (0,0)
+        let dirty = vec![Rect::new(8, 4, 5, 3)];
+        let result = render_diff(&a, &b, &dirty, &mut output, &mut state);
+
+        // Should only detect the change at (10,5)
+        assert_eq!(result.cells_changed, 1);
+    }
+
+    #[test]
+    fn test_cursor_move_optimization() {
+        let mut output = Vec::new();
+
+        // Home position uses short sequence
+        emit_cursor_move(&mut output, 0, 0);
+        assert_eq!(&output, b"\x1b[H");
+
+        output.clear();
+
+        // Column 1 uses shorter sequence
+        emit_cursor_move(&mut output, 0, 5);
+        assert_eq!(&output, b"\x1b[6H"); // Row 6 (1-indexed)
+
+        output.clear();
+
+        // General position
+        emit_cursor_move(&mut output, 10, 5);
+        assert_eq!(&output, b"\x1b[6;11H"); // Row 6, Col 11 (1-indexed)
+    }
+
+    #[test]
+    fn test_render_full() {
+        let mut buffer = Buffer::new(3, 2);
+        buffer.set(0, 0, Cell::new('A'));
+        buffer.set(1, 0, Cell::new('B'));
+        buffer.set(2, 0, Cell::new('C'));
+
+        let mut output = Vec::new();
+        render_full(&buffer, &mut output);
+
+        let output_str = String::from_utf8_lossy(&output);
+        // Should start with hide cursor and home
+        assert!(output_str.starts_with("\x1b[?25l\x1b[H"));
+        // Should contain all characters
+        assert!(output_str.contains('A'));
+        assert!(output_str.contains('B'));
+        assert!(output_str.contains('C'));
+        // Should end with reset and show cursor
+        assert!(output_str.ends_with("\x1b[0m\x1b[?25h"));
+    }
+}
+</file>
+
+<file path="src/buffer/mod.rs">
+//! Buffer module: Core data structures for the double-buffer rendering system.
+//!
+//! This module contains:
+//! - [`Cell`]: The atomic unit of display, optimized for cache efficiency
+//! - [`Buffer`]: A grid of cells representing the terminal screen
+//! - [`Rgb`]: True-color representation
+//! - [`Modifiers`]: Text style bitflags
+//! - [`diff`]: Diffing engine for generating minimal ANSI sequences
+
+mod cell;
+#[allow(clippy::module_inception)]
+mod buffer;
+pub mod diff;
+
+pub use cell::{Cell, CellFlags, Modifiers, Rgb};
+pub use buffer::Buffer;
+</file>
+
+<file path="src/layout/mod.rs">
+//! Layout module: Pre-computed static regions for efficient rendering.
+//!
+//! Layouts are computed once at initialization or on terminal resize.
+//! There is no tree traversal at render time - just a flat Vec<Region>.
+
+mod rect;
+mod region;
+
+pub use rect::Rect;
+pub use region::{Layout, Region, RegionId};
+</file>
+
+<file path="src/layout/rect.rs">
+//! Rect: A rectangle primitive for layout calculations.
+
+/// A rectangle defined by position and size.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct Rect {
+    /// X coordinate (column) of the top-left corner.
+    pub x: u16,
+    /// Y coordinate (row) of the top-left corner.
+    pub y: u16,
+    /// Width in columns.
+    pub width: u16,
+    /// Height in rows.
+    pub height: u16,
+}
+
+impl Rect {
+    /// Create a new rectangle.
+    #[inline]
+    pub const fn new(x: u16, y: u16, width: u16, height: u16) -> Self {
+        Self { x, y, width, height }
+    }
+
+    /// Create a rectangle from a terminal size (full screen).
+    #[inline]
+    pub const fn from_size(width: u16, height: u16) -> Self {
+        Self::new(0, 0, width, height)
+    }
+
+    /// Zero-sized rectangle.
+    pub const ZERO: Self = Self::new(0, 0, 0, 0);
+
+    /// Get the area (number of cells).
+    #[inline]
+    pub const fn area(&self) -> u32 {
+        (self.width as u32) * (self.height as u32)
+    }
+
+    /// Check if the rectangle is empty.
+    #[inline]
+    pub const fn is_empty(&self) -> bool {
+        self.width == 0 || self.height == 0
+    }
+
+    /// Get the right edge (exclusive).
+    #[inline]
+    pub const fn right(&self) -> u16 {
+        self.x.saturating_add(self.width)
+    }
+
+    /// Get the bottom edge (exclusive).
+    #[inline]
+    pub const fn bottom(&self) -> u16 {
+        self.y.saturating_add(self.height)
+    }
+
+    /// Check if a point is inside the rectangle.
+    #[inline]
+    pub const fn contains(&self, x: u16, y: u16) -> bool {
+        x >= self.x && x < self.right() && y >= self.y && y < self.bottom()
+    }
+
+    /// Check if this rectangle intersects with another.
+    #[inline]
+    pub const fn intersects(&self, other: &Self) -> bool {
+        self.x < other.right()
+            && self.right() > other.x
+            && self.y < other.bottom()
+            && self.bottom() > other.y
+    }
+
+    /// Shrink the rectangle by a margin on all sides.
+    #[inline]
+    #[must_use]
+    pub const fn shrink(&self, margin: u16) -> Self {
+        let m2 = margin * 2;
+        if self.width <= m2 || self.height <= m2 {
+            return Self::ZERO;
+        }
+        Self::new(self.x + margin, self.y + margin, self.width - m2, self.height - m2)
+    }
+
+    /// Split horizontally at a given column offset.
+    pub fn split_horizontal(&self, at: u16) -> (Self, Self) {
+        let at = at.min(self.width);
+        (
+            Self::new(self.x, self.y, at, self.height),
+            Self::new(self.x + at, self.y, self.width - at, self.height),
+        )
+    }
+
+    /// Split vertically at a given row offset.
+    pub fn split_vertical(&self, at: u16) -> (Self, Self) {
+        let at = at.min(self.height);
+        (
+            Self::new(self.x, self.y, self.width, at),
+            Self::new(self.x, self.y + at, self.width, self.height - at),
+        )
+    }
+}
+
+impl std::fmt::Debug for Rect {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Rect({}, {} {}x{})", self.x, self.y, self.width, self.height)
+    }
+}
+</file>
+
+<file path="src/layout/region.rs">
+//! Region and Layout: Pre-computed static layout regions.
+
+use super::rect::Rect;
+
+/// Unique identifier for a layout region.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct RegionId(pub u16);
+
+impl RegionId {
+    /// Create a new region ID.
+    pub const fn new(id: u16) -> Self {
+        Self(id)
+    }
+}
+
+/// A layout region with position and dirty tracking.
+#[derive(Clone, Debug)]
+pub struct Region {
+    /// Unique identifier.
+    pub id: RegionId,
+    /// Position and size.
+    pub rect: Rect,
+    /// Z-index for overlays (higher = on top).
+    pub z_index: u8,
+    /// Dirty generation (incremented when content changes).
+    pub dirty_generation: u64,
+}
+
+impl Region {
+    /// Create a new region.
+    pub const fn new(id: RegionId, rect: Rect) -> Self {
+        Self {
+            id,
+            rect,
+            z_index: 0,
+            dirty_generation: 0,
+        }
+    }
+
+    /// Set the z-index.
+    #[must_use]
+    pub const fn with_z_index(mut self, z: u8) -> Self {
+        self.z_index = z;
+        self
+    }
+
+    /// Mark the region as dirty.
+    pub const fn mark_dirty(&mut self) {
+        self.dirty_generation += 1;
+    }
+}
+
+/// Pre-computed layout with static regions.
+#[derive(Clone, Debug)]
+pub struct Layout {
+    /// Flat list of regions (no tree).
+    pub regions: Vec<Region>,
+    /// Terminal size.
+    pub terminal_size: (u16, u16),
+    /// Global generation counter.
+    generation: u64,
+}
+
+impl Layout {
+    /// Create a new layout for the given terminal size.
+    pub const fn new(width: u16, height: u16) -> Self {
+        Self {
+            regions: Vec::new(),
+            terminal_size: (width, height),
+            generation: 0,
+        }
+    }
+
+    /// Add a region to the layout.
+    pub fn add_region(&mut self, region: Region) {
+        self.regions.push(region);
+    }
+
+    /// Get a region by ID.
+    pub fn get(&self, id: RegionId) -> Option<&Region> {
+        self.regions.iter().find(|r| r.id == id)
+    }
+
+    /// Get a mutable region by ID.
+    pub fn get_mut(&mut self, id: RegionId) -> Option<&mut Region> {
+        self.regions.iter_mut().find(|r| r.id == id)
+    }
+
+    /// Get all dirty regions.
+    pub fn dirty_regions(&self) -> impl Iterator<Item = &Region> {
+        self.regions.iter().filter(|r| r.dirty_generation > 0)
+    }
+
+    /// Clear all dirty flags.
+    pub fn clear_dirty(&mut self) {
+        for region in &mut self.regions {
+            region.dirty_generation = 0;
+        }
+    }
+
+    /// Resize the layout and recompute regions.
+    pub const fn resize(&mut self, width: u16, height: u16) {
+        self.terminal_size = (width, height);
+        self.generation += 1;
+        // Subclasses should override to recompute region positions
+    }
+}
+</file>
+
+<file path="src/terminal/mod.rs">
+//! Terminal module: Backend abstraction and output buffering.
+
+mod output;
+
+pub use output::OutputBuffer;
+</file>
+
+<file path="src/terminal/output.rs">
+//! `OutputBuffer`: Single-syscall output buffer for ANSI sequences.
+
+use crate::buffer::Rgb;
+use std::io::Write;
+
+/// Pre-allocated buffer for building ANSI escape sequences.
+///
+/// All output is accumulated here, then flushed in a single `write()` syscall
+/// to prevent terminal flickering.
+pub struct OutputBuffer {
+    data: Vec<u8>,
+}
+
+impl OutputBuffer {
+    /// Create a new output buffer with the given capacity.
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            data: Vec::with_capacity(capacity),
+        }
+    }
+
+    /// Create a buffer sized for a typical terminal (4KB).
+    pub fn new() -> Self {
+        Self::with_capacity(4096)
+    }
+
+    /// Clear the buffer for reuse.
+    #[inline]
+    pub fn clear(&mut self) {
+        self.data.clear();
+    }
+
+    /// Get the buffer contents.
+    #[inline]
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.data
+    }
+
+    /// Get the buffer length.
+    #[inline]
+    pub const fn len(&self) -> usize {
+        self.data.len()
+    }
+
+    /// Check if buffer is empty.
+    #[inline]
+    pub const fn is_empty(&self) -> bool {
+        self.data.is_empty()
+    }
+
+    /// Write raw bytes.
+    #[inline]
+    pub fn write_raw(&mut self, bytes: &[u8]) {
+        self.data.extend_from_slice(bytes);
+    }
+
+    /// Write a string.
+    #[inline]
+    pub fn write_str(&mut self, s: &str) {
+        self.data.extend_from_slice(s.as_bytes());
+    }
+
+    /// Move cursor to (x, y) position (1-indexed for ANSI).
+    #[inline]
+    pub fn cursor_move(&mut self, x: u16, y: u16) {
+        // CSI row ; col H
+        write!(self.data, "\x1b[{};{}H", y + 1, x + 1).unwrap();
+    }
+
+    /// Hide cursor.
+    #[inline]
+    pub fn cursor_hide(&mut self) {
+        self.data.extend_from_slice(b"\x1b[?25l");
+    }
+
+    /// Show cursor.
+    #[inline]
+    pub fn cursor_show(&mut self) {
+        self.data.extend_from_slice(b"\x1b[?25h");
+    }
+
+    /// Set foreground color (true color).
+    #[inline]
+    pub fn set_fg(&mut self, color: Rgb) {
+        write!(self.data, "\x1b[38;2;{};{};{}m", color.r, color.g, color.b).unwrap();
+    }
+
+    /// Set background color (true color).
+    #[inline]
+    pub fn set_bg(&mut self, color: Rgb) {
+        write!(self.data, "\x1b[48;2;{};{};{}m", color.r, color.g, color.b).unwrap();
+    }
+
+    /// Reset all attributes.
+    #[inline]
+    pub fn reset_attrs(&mut self) {
+        self.data.extend_from_slice(b"\x1b[0m");
+    }
+
+    /// Clear the entire screen.
+    #[inline]
+    pub fn clear_screen(&mut self) {
+        self.data.extend_from_slice(b"\x1b[2J");
+    }
+
+    /// Flush to a writer in a single syscall.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the underlying writer fails.
+    pub fn flush_to<W: Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        writer.write_all(&self.data)?;
+        writer.flush()
+    }
+}
+
+impl Default for OutputBuffer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+</file>
+
+<file path="src/widget/mod.rs">
+//! Streaming Widget: Optimistic append for high-frequency token streaming.
+//!
+//! This module implements a specialized widget for displaying streaming text
+//! from LLM agents at 100+ tokens per second without flickering.
+//!
+//! # Architecture
+//!
+//! The streaming widget uses two rendering paths:
+//!
+//! 1. **Fast Path**: When appending text that fits on the current line without
+//!    wrapping or scrolling, we bypass the full diffing engine and emit direct
+//!    ANSI sequences for the new characters. This is the common case.
+//!
+//! 2. **Slow Path**: When text wraps to a new line or causes scrolling, we
+//!    mark the affected region as dirty and let the diffing engine handle it.
+//!
+//! # Example
+//!
+//! ```rust,ignore
+//! use flywheel::widget::StreamWidget;
+//!
+//! let mut stream = StreamWidget::new(Rect::new(0, 0, 80, 24));
+//! stream.append("Hello, ");
+//! stream.append("world!\n");
+//! stream.append("Streaming tokens...");
+//! ```
+
+mod stream;
+mod scroll_buffer;
+
+pub use stream::{StreamWidget, StreamConfig, AppendResult};
+pub use scroll_buffer::ScrollBuffer;
+</file>
+
+<file path="src/widget/scroll_buffer.rs">
+//! Scroll buffer: Ring buffer for storing scrollback history.
+//!
+//! This provides efficient storage for text content that may scroll
+//! off the visible area, with O(1) append and scroll operations.
+
+use std::collections::VecDeque;
+use crate::buffer::Cell;
+
+/// A line of text with associated style information.
+#[derive(Debug, Clone)]
+pub struct StyledLine {
+    /// The text content of the line.
+    pub content: Vec<Cell>,
+    /// Whether this line was soft-wrapped (vs. hard newline).
+    pub wrapped: bool,
+}
+
+impl StyledLine {
+    /// Create a new styled line.
+    pub const fn new(content: Vec<Cell>, wrapped: bool) -> Self {
+        Self { content, wrapped }
+    }
+
+    /// Create an empty line.
+    pub const fn empty() -> Self {
+        Self {
+            content: Vec::new(),
+            wrapped: false,
+        }
+    }
+}
+
+/// Ring buffer for storing lines with scrollback.
+///
+/// The scroll buffer maintains a fixed number of lines in memory,
+/// automatically discarding old lines when capacity is exceeded.
+#[derive(Debug)]
+pub struct ScrollBuffer {
+    /// Lines stored in the buffer.
+    lines: VecDeque<StyledLine>,
+    /// Maximum number of lines to retain.
+    max_lines: usize,
+    /// Current scroll offset from the bottom (0 = at bottom).
+    scroll_offset: usize,
+}
+
+impl ScrollBuffer {
+    /// Create a new scroll buffer with the given capacity.
+    pub fn new(max_lines: usize) -> Self {
+        let mut lines = VecDeque::with_capacity(max_lines);
+        lines.push_back(StyledLine::empty());
+
+        Self {
+            lines,
+            max_lines,
+            scroll_offset: 0,
+        }
+    }
+
+    /// Get the total number of lines in the buffer.
+    pub fn len(&self) -> usize {
+        self.lines.len()
+    }
+
+    /// Check if the buffer is empty.
+    pub fn is_empty(&self) -> bool {
+        self.lines.is_empty()
+    }
+
+    /// Get the current line (the line being appended to).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the buffer is empty (which should never happen).
+    pub fn current_line(&self) -> &StyledLine {
+        self.lines.back().expect("Buffer should never be empty")
+    }
+
+    /// Get a mutable reference to the current line.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the buffer is empty (which should never happen).
+    pub fn current_line_mut(&mut self) -> &mut StyledLine {
+        self.lines.back_mut().expect("Buffer should never be empty")
+    }
+
+    /// Append cells to the current line.
+    pub fn append(&mut self, cells: impl IntoIterator<Item = Cell>) {
+        self.current_line_mut().content.extend(cells);
+    }
+
+    /// Start a new line.
+    ///
+    /// # Arguments
+    ///
+    /// * `wrapped` - Whether the new line is due to soft wrapping.
+    pub fn newline(&mut self, wrapped: bool) {
+        // Trim excess lines if at capacity
+        while self.lines.len() >= self.max_lines {
+            self.lines.pop_front();
+        }
+
+        self.lines.push_back(StyledLine::new(Vec::new(), wrapped));
+    }
+
+    /// Get a line by index from the top of the buffer.
+    pub fn get(&self, index: usize) -> Option<&StyledLine> {
+        self.lines.get(index)
+    }
+
+    /// Get visible lines for a given viewport height.
+    ///
+    /// Returns an iterator over lines that should be visible,
+    /// accounting for scroll offset.
+    pub fn visible_lines(&self, viewport_height: usize) -> impl Iterator<Item = &StyledLine> {
+        let total = self.lines.len();
+        let end = total.saturating_sub(self.scroll_offset);
+        let start = end.saturating_sub(viewport_height);
+
+        self.lines.range(start..end)
+    }
+
+    /// Scroll up by the given number of lines.
+    pub fn scroll_up(&mut self, lines: usize) {
+        let max_offset = self.lines.len().saturating_sub(1);
+        self.scroll_offset = (self.scroll_offset + lines).min(max_offset);
+    }
+
+    /// Scroll down by the given number of lines.
+    pub const fn scroll_down(&mut self, lines: usize) {
+        self.scroll_offset = self.scroll_offset.saturating_sub(lines);
+    }
+
+    /// Scroll to the bottom (latest content).
+    pub const fn scroll_to_bottom(&mut self) {
+        self.scroll_offset = 0;
+    }
+
+    /// Check if we're scrolled to the bottom.
+    pub const fn at_bottom(&self) -> bool {
+        self.scroll_offset == 0
+    }
+
+    /// Clear all content.
+    pub fn clear(&mut self) {
+        self.lines.clear();
+        self.lines.push_back(StyledLine::empty());
+        self.scroll_offset = 0;
+    }
+
+    /// Get the length of the current line in characters.
+    pub fn current_line_len(&self) -> usize {
+        self.current_line().content.len()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn text_to_cells(text: &str) -> Vec<Cell> {
+        text.chars().map(Cell::from_char).collect()
+    }
+
+    #[test]
+    fn test_scroll_buffer_new() {
+        let buf = ScrollBuffer::new(100);
+        assert_eq!(buf.len(), 1);
+        assert!(buf.current_line().content.is_empty());
+    }
+
+    #[test]
+    fn test_scroll_buffer_append() {
+        let mut buf = ScrollBuffer::new(100);
+        buf.append(text_to_cells("Hello"));
+        buf.append(text_to_cells(", world!"));
+        
+        let content: String = buf.current_line().content.iter()
+            .map(|c| c.grapheme().unwrap_or(""))
+            .collect();
+        assert_eq!(content, "Hello, world!");
+    }
+
+    #[test]
+    fn test_scroll_buffer_newline() {
+        let mut buf = ScrollBuffer::new(100);
+        buf.append(text_to_cells("Line 1"));
+        buf.newline(false);
+        buf.append(text_to_cells("Line 2"));
+        assert_eq!(buf.len(), 2);
+        
+        let l1: String = buf.get(0).unwrap().content.iter().map(|c| c.grapheme().unwrap_or("")).collect();
+        assert_eq!(l1, "Line 1");
+    }
+
+    #[test]
+    fn test_scroll_buffer_capacity() {
+        let mut buf = ScrollBuffer::new(3);
+        buf.append(text_to_cells("Line 1"));
+        buf.newline(false);
+        buf.append(text_to_cells("Line 2"));
+        buf.newline(false);
+        buf.append(text_to_cells("Line 3"));
+        buf.newline(false);
+        buf.append(text_to_cells("Line 4"));
+
+        assert_eq!(buf.len(), 3);
+        // Line 1 should have been discarded
+        let l0: String = buf.get(0).unwrap().content.iter().map(|c| c.grapheme().unwrap_or("")).collect();
+        assert_eq!(l0, "Line 2");
+    }
+
+    #[test]
+    fn test_scroll_buffer_scroll() {
+        let mut buf = ScrollBuffer::new(100);
+        for i in 0..10 {
+            buf.append(text_to_cells(&format!("Line {i}")));
+            buf.newline(false);
+        }
+
+        assert!(buf.at_bottom());
+
+        buf.scroll_up(3);
+        assert!(!buf.at_bottom());
+        assert_eq!(buf.scroll_offset, 3);
+
+        buf.scroll_down(1);
+        assert_eq!(buf.scroll_offset, 2);
+
+        buf.scroll_to_bottom();
+        assert!(buf.at_bottom());
+    }
+}
+</file>
+
+<file path="src/widget/stream.rs">
+//! Stream Widget: The core streaming text display widget.
+//!
+//! This widget provides optimistic append with automatic fallback to
+//! slow-path rendering when needed.
+
+use super::scroll_buffer::ScrollBuffer;
+use crate::buffer::{Buffer, Cell, Rgb};
+use crate::layout::Rect;
+use std::io::Write;
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
+
+/// Configuration for the stream widget.
+#[derive(Debug, Clone)]
+pub struct StreamConfig {
+    /// Maximum lines to keep in scrollback.
+    pub max_scrollback: usize,
+    /// Default foreground color.
+    pub default_fg: Rgb,
+    /// Default background color.
+    pub default_bg: Rgb,
+    /// Whether to auto-scroll when new content arrives.
+    pub auto_scroll: bool,
+    /// Whether to enable word wrapping.
+    pub word_wrap: bool,
+}
+
+impl Default for StreamConfig {
+    fn default() -> Self {
+        Self {
+            max_scrollback: 10000,
+            default_fg: Rgb::new(220, 220, 220),
+            default_bg: Rgb::DEFAULT_BG,
+            auto_scroll: true,
+            word_wrap: true,
+        }
+    }
+}
+
+/// Result of an append operation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AppendResult {
+    /// Content was appended using fast path (direct cursor write).
+    FastPath {
+        /// Number of characters appended.
+        chars: usize,
+        /// Starting column of the append.
+        start_col: u16,
+        /// Row of the append.
+        row: u16,
+    },
+    /// Content required slow path (dirty rect for diffing).
+    SlowPath {
+        /// The dirty rectangle that needs re-rendering.
+        dirty_rect: Rect,
+    },
+    /// No content was appended (empty string).
+    Empty,
+}
+
+/// A streaming text widget optimized for LLM token output.
+///
+/// This widget maintains its own content buffer and provides two
+/// rendering paths:
+///
+/// - **Fast path**: Direct cursor-based append for simple cases
+/// - **Slow path**: Full dirty-rect re-render for complex cases
+pub struct StreamWidget {
+    /// Widget bounds within the terminal.
+    bounds: Rect,
+    /// Configuration.
+    config: StreamConfig,
+    /// Content buffer.
+    content: ScrollBuffer,
+    /// Current cursor column within the visible area.
+    cursor_col: u16,
+    /// Current cursor row within the visible area.
+    cursor_row: u16,
+    /// Current foreground color.
+    current_fg: Rgb,
+    /// Current background color.
+    current_bg: Rgb,
+    /// Whether the widget needs a full redraw.
+    needs_full_redraw: bool,
+    /// Dirty rectangles accumulated since last render.
+    dirty_rects: Vec<Rect>,
+}
+
+impl StreamWidget {
+    /// Create a new stream widget with the given bounds.
+    pub fn new(bounds: Rect) -> Self {
+        Self::with_config(bounds, StreamConfig::default())
+    }
+
+    /// Create a new stream widget with custom configuration.
+    pub fn with_config(bounds: Rect, config: StreamConfig) -> Self {
+        Self {
+            bounds,
+            current_fg: config.default_fg,
+            current_bg: config.default_bg,
+            content: ScrollBuffer::new(config.max_scrollback),
+            config,
+            cursor_col: 0,
+            cursor_row: 0,
+            needs_full_redraw: true,
+            dirty_rects: Vec::new(),
+        }
+    }
+
+    /// Get the widget bounds.
+    pub const fn bounds(&self) -> Rect {
+        self.bounds
+    }
+
+    /// Set new bounds for the widget.
+    pub fn set_bounds(&mut self, bounds: Rect) {
+        if bounds != self.bounds {
+            self.bounds = bounds;
+            self.needs_full_redraw = true;
+        }
+    }
+
+    /// Set the foreground color for subsequent text.
+    pub const fn set_fg(&mut self, fg: Rgb) {
+        self.current_fg = fg;
+    }
+
+    /// Set the background color for subsequent text.
+    pub const fn set_bg(&mut self, bg: Rgb) {
+        self.current_bg = bg;
+    }
+
+    /// Reset colors to defaults.
+    pub const fn reset_colors(&mut self) {
+        self.current_fg = self.config.default_fg;
+        self.current_bg = self.config.default_bg;
+    }
+
+    /// Check if fast path append is possible for the given text.
+    ///
+    /// Fast path is possible when:
+    /// 1. We're at the bottom of the scroll buffer
+    /// 2. The text doesn't contain newlines
+    /// 3. The text fits on the current line without wrapping
+    /// 4. No scrolling is needed
+    fn can_fast_path(&self, text: &str) -> bool {
+        // Must be at bottom for fast path
+        if !self.content.at_bottom() {
+            return false;
+        }
+
+        // No newlines allowed in fast path
+        if text.contains('\n') {
+            return false;
+        }
+
+        // Check if text fits on current line
+        let text_width = UnicodeWidthStr::width(text);
+        let available = (self.bounds.width as usize).saturating_sub(self.cursor_col as usize);
+
+        text_width <= available
+    }
+
+    /// Append text using the fast path.
+    ///
+    /// This directly emits ANSI sequences without going through the diffing
+    /// engine. Only call this after checking `can_fast_path()`.
+    fn append_fast_path(&mut self, text: &str) -> AppendResult {
+        let start_col = self.cursor_col;
+        let row = self.cursor_row;
+        let mut char_count = 0;
+
+        // Append to content buffer
+        let cells = text.graphemes(true).filter_map(|g| {
+             Cell::from_grapheme(g).map(|mut c| {
+                 c.set_fg(self.current_fg);
+                 c.set_bg(self.current_bg);
+                 c
+             })
+        });
+        self.content.append(cells);
+
+        // Update cursor position
+        for grapheme in text.graphemes(true) {
+            let width = UnicodeWidthStr::width(grapheme);
+            // safe cast: can_fast_path ensures it fits in width
+            self.cursor_col += u16::try_from(width).unwrap_or(0);
+            char_count += 1;
+        }
+
+        AppendResult::FastPath {
+            chars: char_count,
+            start_col,
+            row,
+        }
+    }
+
+    /// Append text using the slow path.
+    ///
+    /// This processes the text, handling newlines and wrapping, and marks
+    /// the affected area as dirty for the diffing engine.
+    fn append_slow_path(&mut self, text: &str) -> AppendResult {
+        let initial_row = self.cursor_row;
+        let mut max_row = self.cursor_row;
+        let initial_col = self.cursor_col;
+        let mut min_touched_col = self.cursor_col;
+        let mut max_col = self.cursor_col;
+
+        for ch in text.chars() {
+            match ch {
+                '\n' => {
+                    // Hard newline
+                    let was_at_bottom = self.content.at_bottom();
+                    self.content.newline(false);
+                    if !was_at_bottom {
+                        self.content.scroll_up(1);
+                    }
+                    
+                    max_col = max_col.max(self.cursor_col);
+                    self.cursor_col = 0;
+                    min_touched_col = 0; // Newline starts at 0
+                    self.cursor_row += 1;
+
+                    // Check for scroll
+                    if self.cursor_row >= self.bounds.height {
+                        self.handle_scroll(was_at_bottom);
+                    }
+                }
+                '\r' => {
+                    // Carriage return
+                    self.cursor_col = 0;
+                    min_touched_col = 0;
+                }
+                '\t' => {
+                    // Tab - expand to spaces
+                    let spaces = 4 - (self.cursor_col % 4);
+                    for _ in 0..spaces {
+                        self.append_char(' ');
+                    }
+                }
+                _ => {
+                    self.append_char(ch);
+                }
+            }
+
+            max_row = max_row.max(self.cursor_row);
+            max_col = max_col.max(self.cursor_col);
+            
+            // If wrap happened in append_char, min_touched_col should be updated in a real implementation
+            if self.cursor_col < initial_col && self.cursor_row > initial_row {
+                 min_touched_col = 0;
+            }
+        }
+
+        // Calculate dirty rect
+        let dirty_rect = Rect {
+            x: self.bounds.x + min_touched_col,
+            y: self.bounds.y + initial_row,
+            width: self.bounds.width,
+            height: (max_row - initial_row + 1).max(1),
+        };
+
+        if !self.needs_full_redraw {
+             self.dirty_rects.push(dirty_rect);
+        }
+
+        AppendResult::SlowPath { dirty_rect }
+    }
+
+    /// Append a single character, handling wrapping.
+    #[allow(clippy::cast_possible_truncation)]
+    fn append_char(&mut self, ch: char) {
+        let char_width = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0) as u16;
+
+        // Check for wrap
+        if self.cursor_col + char_width > self.bounds.width {
+            if self.config.word_wrap {
+                let was_at_bottom = self.content.at_bottom();
+                self.content.newline(true);
+                if !was_at_bottom {
+                    self.content.scroll_up(1);
+                }
+                
+                self.cursor_col = 0;
+                self.cursor_row += 1;
+
+                if self.cursor_row >= self.bounds.height {
+                    self.handle_scroll(was_at_bottom);
+                }
+            } else {
+                // No wrap - just don't add the character
+                return;
+            }
+        }
+
+        // Add character to content
+        let mut cell = Cell::from_char(ch);
+        cell.set_fg(self.current_fg);
+        cell.set_bg(self.current_bg);
+        
+        self.content.append(std::iter::once(cell));
+        self.cursor_col += char_width;
+    }
+
+    /// Handle scrolling when cursor goes past bottom.
+    const fn handle_scroll(&mut self, was_at_bottom: bool) {
+        // Keep cursor at bottom row
+        self.cursor_row = self.bounds.height - 1;
+
+        // If we were at bottom and auto-scrolling is on, stick to bottom.
+        // Otherwise, stay detached (sticky scroll).
+        if self.config.auto_scroll && was_at_bottom {
+            self.content.scroll_to_bottom();
+        }
+
+        // Full redraw needed when scrolling
+        self.needs_full_redraw = true;
+    }
+
+    /// Append text to the widget.
+    ///
+    /// This automatically chooses between fast and slow path based on
+    /// the text content and current state.
+    pub fn append(&mut self, text: &str) -> AppendResult {
+        if text.is_empty() {
+            return AppendResult::Empty;
+        }
+
+        if self.can_fast_path(text) {
+            self.append_fast_path(text)
+        } else {
+            self.append_slow_path(text)
+        }
+    }
+
+    /// Render the widget to a buffer.
+    ///
+    /// This renders the visible content to the given buffer.
+    #[allow(clippy::cast_possible_truncation)]
+    pub fn render(&mut self, buffer: &mut Buffer) {
+        let viewport_height = self.bounds.height as usize;
+
+        // Get visible lines
+        let visible_lines: Vec<_> = self.content.visible_lines(viewport_height).collect();
+
+        // Render each line
+        for (row, line) in visible_lines.iter().enumerate() {
+            let y = self.bounds.y + row as u16;
+            if y >= self.bounds.y + self.bounds.height {
+                break;
+            }
+
+            let mut col = 0u16;
+            for cell in &line.content {
+                if col >= self.bounds.width {
+                    break;
+                }
+
+                let x = self.bounds.x + col;
+                // buffer.set(x, y, *cell); // Direct set since cell has grapheme and style
+                // But wait, buffer.set takes x, y, Cell.
+                buffer.set(x, y, *cell); 
+                
+                col += u16::from(cell.display_width());
+            }
+
+            // Clear rest of line
+            while col < self.bounds.width {
+                let x = self.bounds.x + col;
+                buffer.set(x, y, Cell::new(' ').with_fg(self.current_fg).with_bg(self.current_bg));
+                col += 1;
+            }
+        }
+
+        // Clear any remaining rows
+        for row in visible_lines.len()..viewport_height {
+            let y = self.bounds.y + row as u16;
+            for col in 0..self.bounds.width {
+                let x = self.bounds.x + col;
+                buffer.set(x, y, Cell::new(' ').with_fg(self.current_fg).with_bg(self.current_bg));
+            }
+        }
+
+        self.needs_full_redraw = false;
+        self.dirty_rects.clear();
+    }
+
+    /// Write fast-path output directly to an output buffer.
+    ///
+    /// This generates ANSI sequences for direct terminal output,
+    /// bypassing the buffer diffing.
+    pub fn write_fast_path(
+        &self,
+        result: AppendResult,
+        text: &str,
+        output: &mut Vec<u8>,
+    ) {
+        if let AppendResult::FastPath { start_col, row, .. } = result {
+            // Move cursor to position
+            let abs_x = self.bounds.x + start_col + 1; // 1-indexed
+            let abs_y = self.bounds.y + row + 1; // 1-indexed
+
+            let _ = write!(output, "\x1b[{abs_y};{abs_x}H");
+
+            // Set colors
+            let _ = write!(
+                output,
+                "\x1b[38;2;{};{};{}m\x1b[48;2;{};{};{}m",
+                self.current_fg.r, self.current_fg.g, self.current_fg.b,
+                self.current_bg.r, self.current_bg.g, self.current_bg.b
+            );
+
+            // Write text
+            output.extend_from_slice(text.as_bytes());
+        }
+    }
+
+    /// Append text and perform fast-path generation if possible.
+    ///
+    /// If the text was successfully appended via fast path (no wrap, no scroll),
+    /// the ANSI sequence is written to `output` and `true` is returned.
+    /// Otherwise returns `false` (caller should rely on standard cycle).
+    pub fn append_fast_into(&mut self, text: &str, output: &mut Vec<u8>) -> bool {
+        let result = self.append(text);
+        if let AppendResult::FastPath { .. } = result {
+            self.write_fast_path(result, text, output);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Check if a full redraw is needed.
+    pub const fn needs_redraw(&self) -> bool {
+        self.needs_full_redraw || !self.dirty_rects.is_empty()
+    }
+
+    /// Get the dirty rectangles.
+    pub fn dirty_rects(&self) -> &[Rect] {
+        &self.dirty_rects
+    }
+
+    /// Mark the widget for full redraw.
+    pub const fn invalidate(&mut self) {
+        self.needs_full_redraw = true;
+    }
+
+    /// Clear all content.
+    pub fn clear(&mut self) {
+        self.content.clear();
+        self.cursor_col = 0;
+        self.cursor_row = 0;
+        self.needs_full_redraw = true;
+    }
+
+    /// Scroll up by the given number of lines.
+    pub fn scroll_up(&mut self, lines: usize) {
+        self.content.scroll_up(lines);
+        self.needs_full_redraw = true;
+    }
+
+    /// Scroll down by the given number of lines.
+    pub const fn scroll_down(&mut self, lines: usize) {
+        self.content.scroll_down(lines);
+        self.needs_full_redraw = true;
+    }
+
+    /// Get the current cursor position within the widget.
+    pub const fn cursor_position(&self) -> (u16, u16) {
+        (self.cursor_col, self.cursor_row)
+    }
+
+    /// Get the number of lines in the buffer.
+    pub fn line_count(&self) -> usize {
+        self.content.len()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_stream_widget_new() {
+        let widget = StreamWidget::new(Rect::new(0, 0, 80, 24));
+        assert_eq!(widget.bounds().width, 80);
+        assert_eq!(widget.bounds().height, 24);
+        assert_eq!(widget.cursor_position(), (0, 0));
+    }
+
+    #[test]
+    fn test_stream_widget_append_fast_path() {
+        let mut widget = StreamWidget::new(Rect::new(0, 0, 80, 24));
+        let result = widget.append("Hello");
+
+        match result {
+            AppendResult::FastPath { chars, start_col, row } => {
+                assert_eq!(chars, 5);
+                assert_eq!(start_col, 0);
+                assert_eq!(row, 0);
+            }
+            _ => panic!("Expected fast path"),
+        }
+
+        assert_eq!(widget.cursor_position(), (5, 0));
+    }
+
+    #[test]
+    fn test_stream_widget_append_slow_path_newline() {
+        let mut widget = StreamWidget::new(Rect::new(0, 0, 80, 24));
+        let result = widget.append("Hello\nWorld");
+
+        match result {
+            AppendResult::SlowPath { .. } => {}
+            _ => panic!("Expected slow path due to newline"),
+        }
+
+        assert_eq!(widget.cursor_position(), (5, 1));
+    }
+
+    #[test]
+    fn test_stream_widget_wrap() {
+        let mut widget = StreamWidget::new(Rect::new(0, 0, 10, 24));
+        
+        // Append text that will wrap
+        widget.append("12345678901234567890");
+        
+        // Should have wrapped to line 2
+        assert!(widget.cursor_row > 0);
+    }
+
+    #[test]
+    fn test_stream_widget_render() {
+        let mut widget = StreamWidget::new(Rect::new(0, 0, 10, 3));
+        widget.append("Line 1\nLine 2\nLine 3");
+
+        let mut buffer = Buffer::new(10, 3);
+        widget.render(&mut buffer);
+
+        // Check that content was rendered
+        let cell = buffer.get(0, 0).unwrap();
+        assert_eq!(cell.grapheme(), Some("L"));
+    }
+}
+</file>
+
+<file path="src/ffi.rs">
+//! C Foreign Function Interface (FFI) for Flywheel.
+//!
+//! This module provides a C-compatible API for using Flywheel from
+//! other programming languages. All functions are `extern "C"` with
+//! stable ABI.
+//!
+//! # Safety
+//!
+//! All functions that accept pointers require valid, non-null pointers.
+//! The caller is responsible for proper memory management of handles.
+//!
+//! # Example (C)
+//!
+//! ```c
+//! #include "flywheel.h"
+//!
+//! int main() {
+//!     FlywheelEngine* engine = flywheel_engine_new();
+//!     if (!engine) return 1;
+//!
+//!     flywheel_engine_draw_text(engine, 0, 0, "Hello from C!", 0xFFFFFF, 0x000000);
+//!     flywheel_engine_request_redraw(engine);
+//!
+//!     // Main loop...
+//!
+//!     flywheel_engine_destroy(engine);
+//!     return 0;
+//! }
+//! ```
+
+// FFI modules intentionally use unsafe and no_mangle
+#![allow(unsafe_op_in_unsafe_fn)]
+#![allow(clippy::not_unsafe_ptr_arg_deref)]
+
+use crate::actor::{Engine, InputEvent, KeyCode};
+use crate::buffer::{Cell, Rgb};
+use crate::layout::Rect;
+use crate::widget::{AppendResult, StreamWidget};
+use std::ffi::CStr;
+use std::os::raw::{c_char, c_int, c_uint};
+use std::ptr;
+
+// =============================================================================
+// Opaque Handle Types
+// =============================================================================
+
+/// Opaque handle to a Flywheel engine.
+pub struct FlywheelEngine(Engine);
+
+/// Opaque handle to a stream widget.
+pub struct FlywheelStream(StreamWidget);
+
+// =============================================================================
+// Result and Error Codes
+// =============================================================================
+
+/// Result codes for FFI functions.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FlywheelResult {
+    /// Operation succeeded.
+    Ok = 0,
+    /// Null pointer passed.
+    NullPointer = 1,
+    /// Invalid UTF-8 string.
+    InvalidUtf8 = 2,
+    /// I/O error.
+    IoError = 3,
+    /// Out of bounds.
+    OutOfBounds = 4,
+    /// Engine not running.
+    NotRunning = 5,
+}
+
+/// Input event type from polling.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FlywheelEventType {
+    /// No event available.
+    None = 0,
+    /// Key press event.
+    Key = 1,
+    /// Terminal resize event.
+    Resize = 2,
+    /// Error event.
+    Error = 3,
+    /// Shutdown event.
+    Shutdown = 4,
+}
+
+/// Key event data.
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct FlywheelKeyEvent {
+    /// The character (for printable keys), or 0.
+    pub char_code: u32,
+    /// Special key code (see `FLYWHEEL_KEY_*` constants).
+    pub key_code: c_int,
+    /// Modifier flags.
+    pub modifiers: c_uint,
+}
+
+/// Resize event data.
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct FlywheelResizeEvent {
+    /// New width.
+    pub width: u16,
+    /// New height.
+    pub height: u16,
+}
+
+/// Polled event structure.
+#[repr(C)]
+pub struct FlywheelEvent {
+    /// Event type.
+    pub event_type: FlywheelEventType,
+    /// Key event data (valid if `event_type` == Key).
+    pub key: FlywheelKeyEvent,
+    /// Resize event data (valid if `event_type` == Resize).
+    pub resize: FlywheelResizeEvent,
+}
+
+// Key code constants
+/// No special key.
+pub const FLYWHEEL_KEY_NONE: c_int = 0;
+/// Enter key.
+pub const FLYWHEEL_KEY_ENTER: c_int = 1;
+/// Escape key.
+pub const FLYWHEEL_KEY_ESCAPE: c_int = 2;
+/// Backspace key.
+pub const FLYWHEEL_KEY_BACKSPACE: c_int = 3;
+/// Tab key.
+pub const FLYWHEEL_KEY_TAB: c_int = 4;
+/// Left arrow.
+pub const FLYWHEEL_KEY_LEFT: c_int = 5;
+/// Right arrow.
+pub const FLYWHEEL_KEY_RIGHT: c_int = 6;
+/// Up arrow.
+pub const FLYWHEEL_KEY_UP: c_int = 7;
+/// Down arrow.
+pub const FLYWHEEL_KEY_DOWN: c_int = 8;
+/// Home key.
+pub const FLYWHEEL_KEY_HOME: c_int = 9;
+/// End key.
+pub const FLYWHEEL_KEY_END: c_int = 10;
+/// Page Up.
+pub const FLYWHEEL_KEY_PAGE_UP: c_int = 11;
+/// Page Down.
+pub const FLYWHEEL_KEY_PAGE_DOWN: c_int = 12;
+/// Delete key.
+pub const FLYWHEEL_KEY_DELETE: c_int = 13;
+
+// Modifier flags
+/// Shift modifier.
+pub const FLYWHEEL_MOD_SHIFT: c_uint = 1;
+/// Control modifier.
+pub const FLYWHEEL_MOD_CTRL: c_uint = 2;
+/// Alt modifier.
+pub const FLYWHEEL_MOD_ALT: c_uint = 4;
+/// Super/Command modifier.
+pub const FLYWHEEL_MOD_SUPER: c_uint = 8;
+
+// =============================================================================
+// Engine Functions
+// =============================================================================
+
+/// Create a new Flywheel engine with default configuration.
+///
+/// Returns NULL on failure.
+#[unsafe(no_mangle)]
+pub extern "C" fn flywheel_engine_new() -> *mut FlywheelEngine {
+    Engine::new().map_or(
+        ptr::null_mut(),
+        |engine| Box::into_raw(Box::new(FlywheelEngine(engine)))
+    )
+}
+
+/// Destroy a Flywheel engine.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn flywheel_engine_destroy(engine: *mut FlywheelEngine) {
+    if !engine.is_null() {
+        drop(Box::from_raw(engine));
+    }
+}
+
+/// Get the terminal width.
+#[unsafe(no_mangle)]
+pub const unsafe extern "C" fn flywheel_engine_width(engine: *const FlywheelEngine) -> u16 {
+    if engine.is_null() {
+        return 0;
+    }
+    (*engine).0.width()
+}
+
+/// Get the terminal height.
+#[unsafe(no_mangle)]
+pub const unsafe extern "C" fn flywheel_engine_height(engine: *const FlywheelEngine) -> u16 {
+    if engine.is_null() {
+        return 0;
+    }
+    (*engine).0.height()
+}
+
+/// Check if the engine is still running.
+#[unsafe(no_mangle)]
+pub const unsafe extern "C" fn flywheel_engine_is_running(engine: *const FlywheelEngine) -> bool {
+    if engine.is_null() {
+        return false;
+    }
+    (*engine).0.is_running()
+}
+
+/// Stop the engine.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn flywheel_engine_stop(engine: *mut FlywheelEngine) {
+    if !engine.is_null() {
+        (*engine).0.stop();
+    }
+}
+
+/// Poll for the next input event.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn flywheel_engine_poll_event(
+    engine: *const FlywheelEngine,
+    event_out: *mut FlywheelEvent,
+) -> FlywheelEventType {
+    if engine.is_null() || event_out.is_null() {
+        return FlywheelEventType::None;
+    }
+
+    match (*engine).0.poll_input() {
+        Some(InputEvent::Key { code, modifiers }) => {
+            let (char_code, key_code) = convert_key_code(code);
+            let mods = convert_modifiers(modifiers);
+
+            (*event_out).event_type = FlywheelEventType::Key;
+            (*event_out).key = FlywheelKeyEvent {
+                char_code,
+                key_code,
+                modifiers: mods,
+            };
+            FlywheelEventType::Key
+        }
+        Some(InputEvent::Resize { width, height }) => {
+            (*event_out).event_type = FlywheelEventType::Resize;
+            (*event_out).resize = FlywheelResizeEvent { width, height };
+            FlywheelEventType::Resize
+        }
+        Some(InputEvent::Shutdown) => {
+            (*event_out).event_type = FlywheelEventType::Shutdown;
+            FlywheelEventType::Shutdown
+        }
+        Some(InputEvent::Error(_)) => {
+            (*event_out).event_type = FlywheelEventType::Error;
+            FlywheelEventType::Error
+        }
+        _ => {
+            (*event_out).event_type = FlywheelEventType::None;
+            FlywheelEventType::None
+        }
+    }
+}
+
+/// Handle a resize event.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn flywheel_engine_handle_resize(
+    engine: *mut FlywheelEngine,
+    width: u16,
+    height: u16,
+) {
+    if !engine.is_null() {
+        (*engine).0.handle_resize(width, height);
+    }
+}
+
+/// Request a full redraw.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn flywheel_engine_request_redraw(engine: *const FlywheelEngine) {
+    if !engine.is_null() {
+        (*engine).0.request_redraw();
+    }
+}
+
+/// Request a diff-based update.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn flywheel_engine_request_update(engine: *const FlywheelEngine) {
+    if !engine.is_null() {
+        (*engine).0.request_update();
+    }
+}
+
+/// Begin a new frame.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn flywheel_engine_begin_frame(engine: *mut FlywheelEngine) {
+    if !engine.is_null() {
+        (*engine).0.begin_frame();
+    }
+}
+
+/// End a frame and request update.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn flywheel_engine_end_frame(engine: *mut FlywheelEngine) {
+    if !engine.is_null() {
+        (*engine).0.end_frame();
+    }
+}
+
+/// Set a cell at the given position.
+#[unsafe(no_mangle)]
+#[allow(clippy::cast_sign_loss)] // c_char may be signed
+pub unsafe extern "C" fn flywheel_engine_set_cell(
+    engine: *mut FlywheelEngine,
+    x: u16,
+    y: u16,
+    c: c_char,
+    fg: u32,
+    bg: u32,
+) {
+    if engine.is_null() {
+        return;
+    }
+    let cell = Cell::new(c as u8 as char)
+        .with_fg(Rgb::from_u32(fg))
+        .with_bg(Rgb::from_u32(bg));
+    (*engine).0.set_cell(x, y, cell);
+}
+
+/// Draw text at the given position.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn flywheel_engine_draw_text(
+    engine: *mut FlywheelEngine,
+    x: u16,
+    y: u16,
+    text: *const c_char,
+    fg: u32,
+    bg: u32,
+) -> u16 {
+    if engine.is_null() || text.is_null() {
+        return 0;
+    }
+
+    let Ok(text_str) = CStr::from_ptr(text).to_str() else {
+        return 0;
+    };
+
+    (*engine)
+        .0
+        .draw_text(x, y, text_str, Rgb::from_u32(fg), Rgb::from_u32(bg))
+}
+
+/// Clear the entire buffer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn flywheel_engine_clear(engine: *mut FlywheelEngine) {
+    if !engine.is_null() {
+        (*engine).0.clear();
+    }
+}
+
+/// Fill a rectangle with a character.
+#[unsafe(no_mangle)]
+#[allow(clippy::cast_sign_loss)] // c_char may be signed
+pub unsafe extern "C" fn flywheel_engine_fill_rect(
+    engine: *mut FlywheelEngine,
+    x: u16,
+    y: u16,
+    width: u16,
+    height: u16,
+    c: c_char,
+    fg: u32,
+    bg: u32,
+) {
+    if engine.is_null() {
+        return;
+    }
+    let cell = Cell::new(c as u8 as char)
+        .with_fg(Rgb::from_u32(fg))
+        .with_bg(Rgb::from_u32(bg));
+    (*engine).0.fill_rect(Rect::new(x, y, width, height), cell);
+}
+
+// =============================================================================
+// Stream Widget Functions
+// =============================================================================
+
+/// Create a new stream widget.
+#[unsafe(no_mangle)]
+pub extern "C" fn flywheel_stream_new(x: u16, y: u16, width: u16, height: u16) -> *mut FlywheelStream {
+    let widget = StreamWidget::new(Rect::new(x, y, width, height));
+    Box::into_raw(Box::new(FlywheelStream(widget)))
+}
+
+/// Destroy a stream widget.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn flywheel_stream_destroy(stream: *mut FlywheelStream) {
+    if !stream.is_null() {
+        drop(Box::from_raw(stream));
+    }
+}
+
+/// Append text to the stream widget.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn flywheel_stream_append(
+    stream: *mut FlywheelStream,
+    text: *const c_char,
+) -> c_int {
+    if stream.is_null() || text.is_null() {
+        return -1;
+    }
+
+    let Ok(text_str) = CStr::from_ptr(text).to_str() else {
+        return -1;
+    };
+
+    match (*stream).0.append(text_str) {
+        AppendResult::FastPath { .. } => 1,
+        AppendResult::SlowPath { .. } | AppendResult::Empty => 0,
+    }
+}
+
+/// Render the stream widget to the engine's buffer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn flywheel_stream_render(
+    stream: *mut FlywheelStream,
+    engine: *mut FlywheelEngine,
+) {
+    if stream.is_null() || engine.is_null() {
+        return;
+    }
+    (*stream).0.render((*engine).0.buffer_mut());
+}
+
+/// Clear the stream widget content.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn flywheel_stream_clear(stream: *mut FlywheelStream) {
+    if !stream.is_null() {
+        (*stream).0.clear();
+    }
+}
+
+/// Set the foreground color for subsequent text.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn flywheel_stream_set_fg(stream: *mut FlywheelStream, color: u32) {
+    if !stream.is_null() {
+        (*stream).0.set_fg(Rgb::from_u32(color));
+    }
+}
+
+/// Set the background color for subsequent text.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn flywheel_stream_set_bg(stream: *mut FlywheelStream, color: u32) {
+    if !stream.is_null() {
+        (*stream).0.set_bg(Rgb::from_u32(color));
+    }
+}
+
+/// Scroll the stream widget up.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn flywheel_stream_scroll_up(stream: *mut FlywheelStream, lines: usize) {
+    if !stream.is_null() {
+        (*stream).0.scroll_up(lines);
+    }
+}
+
+/// Scroll the stream widget down.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn flywheel_stream_scroll_down(stream: *mut FlywheelStream, lines: usize) {
+    if !stream.is_null() {
+        (*stream).0.scroll_down(lines);
+    }
+}
+
+// =============================================================================
+// Color Utilities
+// =============================================================================
+
+/// Create an RGB color from components.
+#[unsafe(no_mangle)]
+#[allow(clippy::cast_lossless)]
+pub const extern "C" fn flywheel_rgb(r: u8, g: u8, b: u8) -> u32 {
+    ((r as u32) << 16) | ((g as u32) << 8) | (b as u32)
+}
+
+// =============================================================================
+// Version Information
+// =============================================================================
+
+/// Get the Flywheel version string.
+#[unsafe(no_mangle)]
+pub extern "C" fn flywheel_version() -> *const c_char {
+    static VERSION: &[u8] = b"0.1.0\0";
+    VERSION.as_ptr().cast::<c_char>()
+}
+
+// =============================================================================
+// Helper Functions
+// =============================================================================
+
+const fn convert_key_code(code: KeyCode) -> (u32, c_int) {
+    match code {
+        KeyCode::Char(c) => (c as u32, FLYWHEEL_KEY_NONE),
+        KeyCode::Enter => (0, FLYWHEEL_KEY_ENTER),
+        KeyCode::Esc => (0, FLYWHEEL_KEY_ESCAPE),
+        KeyCode::Backspace => (0, FLYWHEEL_KEY_BACKSPACE),
+        KeyCode::Tab => (0, FLYWHEEL_KEY_TAB),
+        KeyCode::Left => (0, FLYWHEEL_KEY_LEFT),
+        KeyCode::Right => (0, FLYWHEEL_KEY_RIGHT),
+        KeyCode::Up => (0, FLYWHEEL_KEY_UP),
+        KeyCode::Down => (0, FLYWHEEL_KEY_DOWN),
+        KeyCode::Home => (0, FLYWHEEL_KEY_HOME),
+        KeyCode::End => (0, FLYWHEEL_KEY_END),
+        KeyCode::PageUp => (0, FLYWHEEL_KEY_PAGE_UP),
+        KeyCode::PageDown => (0, FLYWHEEL_KEY_PAGE_DOWN),
+        KeyCode::Delete => (0, FLYWHEEL_KEY_DELETE),
+        _ => (0, FLYWHEEL_KEY_NONE),
+    }
+}
+
+const fn convert_modifiers(mods: crate::actor::KeyModifiers) -> c_uint {
+    let mut result = 0;
+    if mods.shift {
+        result |= FLYWHEEL_MOD_SHIFT;
+    }
+    if mods.control {
+        result |= FLYWHEEL_MOD_CTRL;
+    }
+    if mods.alt {
+        result |= FLYWHEEL_MOD_ALT;
+    }
+    if mods.super_key {
+        result |= FLYWHEEL_MOD_SUPER;
+    }
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_flywheel_rgb() {
+        assert_eq!(flywheel_rgb(255, 128, 64), 0xFF8040);
+        assert_eq!(flywheel_rgb(0, 0, 0), 0x000000);
+        assert_eq!(flywheel_rgb(255, 255, 255), 0xFFFFFF);
+    }
+
+    #[test]
+    fn test_flywheel_version() {
+        unsafe {
+            let version = flywheel_version();
+            let version_str = CStr::from_ptr(version).to_str().unwrap();
+            assert_eq!(version_str, "0.1.0");
+        }
+    }
+}
+</file>
+
+<file path="src/lib.rs">
+//! # Flywheel
+//!
+//! A zero-flicker terminal compositor for Agentic CLIs.
+//!
+//! Flywheel is a purpose-built TUI engine designed for high-frequency token streaming
+//! (100+ tokens/s) without flickering, blocking, or latency.
+//!
+//! ## Core Concepts
+//!
+//! - **Double-buffered rendering**: Current and Next buffers with minimal diff
+//! - **Dirty rectangles**: Only re-render changed regions
+//! - **Actor model**: Isolated threads for input, rendering, and agent logic
+//! - **Optimistic append**: Fast path for streaming text that bypasses diffing
+//!
+//! ## Example
+//!
+//! ```rust,ignore
+//! use flywheel::{Buffer, Cell, Rect};
+//!
+//! // Create a buffer for a 80x24 terminal
+//! let mut buffer = Buffer::new(80, 24);
+//!
+//! // Write a cell
+//! buffer.set(0, 0, Cell::new('H'));
+//! ```
+
+#![warn(missing_docs)]
+#![warn(clippy::pedantic)]
+#![warn(clippy::nursery)]
+#![allow(clippy::module_name_repetitions)]
+#![allow(clippy::must_use_candidate)]
+#![allow(clippy::similar_names)]
+
+pub mod buffer;
+pub mod layout;
+pub mod terminal;
+pub mod actor;
+pub mod widget;
+
+// FFI module has intentional unsafe code and no_mangle exports
+#[allow(unsafe_code)]
+#[allow(clippy::missing_safety_doc)]
+pub mod ffi;
+
+// Re-exports for convenience
+pub use buffer::{Buffer, Cell, CellFlags, Modifiers, Rgb};
+pub use layout::{Layout, Rect, Region, RegionId};
+pub use actor::{Engine, EngineConfig, InputEvent, KeyCode, KeyModifiers, RenderCommand, AgentEvent};
+pub use widget::{StreamWidget, StreamConfig, AppendResult, ScrollBuffer};
+</file>
+
+<file path=".gitignore">
+# Rust build artifacts
+/target/
+**/*.rs.bk
+Cargo.lock
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+
+# Benchmark results (keep HTML reports in git if desired)
+# criterion/
+
+# Coverage
+*.profraw
+*.profdata
+coverage/
+</file>
+
+<file path="ARCHITECTURE.md">
+# Flywheel Architecture
+
+> A zero-flicker terminal compositor for Agentic CLIs
+
+**Version:** 0.1.0  
+**Last Updated:** 2026-01-29  
+**Status:** Implementation Phase 1
+
+---
+
+## 1. Mission Statement
+
+Modern Terminal User Interfaces for AI Agents suffer from a performance crisis. Frameworks like Ink (React) and BubbleTea (Elm) fail to handle high-frequency token streaming (100+ tokens/s) without flickering, high CPU usage, or input latency.
+
+Flywheel rejects the "Web-to-Terminal" abstraction. We are building a purpose-built engine for Agentic CLIs.
+
+---
+
+## 2. Performance Targets
+
+| Metric | Target | Rationale |
+|--------|--------|-----------|
+| Frame Time | < 1ms | 16ms is not the budget; 16ms is an eternity |
+| Flicker | Zero | Updates must be atomic—no cleared screens, no half-drawn frames |
+| Input Latency | Zero blocking | Input loop never waits for renderer or LLM |
+| Token Throughput | 100+ tokens/s | Must handle streaming LLM output without degradation |
+
+---
+
+## 3. Architectural Axioms
+
+### Axiom A: Retained Mode Memory, Immediate Mode Flush
+
+We maintain screen state in two buffers (Current and Next). We do NOT redraw the whole screen every frame. We calculate the diff, generate a minimal ANSI sequence, and flush it in a **single `write()` syscall**.
+
+```
+┌─────────────┐    ┌─────────────┐    ┌─────────────┐
+│   Current   │    │    Next     │    │   Output    │
+│   Buffer    │───▶│   Buffer    │───▶│   (ANSI)    │──▶ stdout
+│  (visible)  │diff│  (staging)  │gen │  Vec<u8>    │
+└─────────────┘    └─────────────┘    └─────────────┘
+                                            │
+                                            ▼
+                                    Single write() syscall
+```
+
+### Axiom B: Dirty-Rect Optimization
+
+For LLM streaming, we cannot diff the entire screen every frame. We support "Dirty Rectangles." If a widget updates, only its specific region is checked for diffs.
+
+```rust
+struct DirtyRegion {
+    rect: Rect,
+    generation: u64,  // Monotonic counter for invalidation tracking
+}
+```
+
+### Axiom C: Actor Model (Thread Isolation)
+
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│   Input     │     │   Network   │     │   Render    │
+│   Thread    │     │   Thread    │     │   Thread    │
+│             │     │             │     │             │
+│ crossterm   │     │ LLM/Agent   │     │ ONLY thread │
+│ event poll  │     │ logic       │     │ touching    │
+│             │     │             │     │ stdout      │
+└──────┬──────┘     └──────┬──────┘     └──────┬──────┘
+       │                   │                   │
+       │    ┌──────────────┴───────────────┐   │
+       └───▶│      crossbeam-channel       │◀──┘
+            │      (lock-free MPSC)        │
+            └──────────────────────────────┘
+```
+
+### Axiom D: Optimistic Append (The Agent Fast Path)
+
+For streaming text, if a new token arrives and does NOT invalidate layout (no wrap, no scroll), we **bypass the diffing engine** and emit a direct cursor-write command.
+
+```rust
+fn can_fast_path_append(widget: &StreamWidget, token: &str) -> bool {
+    let token_width = unicode_width::UnicodeWidthStr::width(token);
+    let current_col = widget.cursor_col;
+    let widget_width = widget.rect.width;
+    
+    current_col + token_width <= widget_width
+        && !token.contains('\n')
+        && widget.scroll_offset == widget.max_scroll
+}
+```
+
+---
+
+## 4. Memory Layout Decisions
+
+### 4.1 Cell Structure (16 bytes)
+
+```rust
+#[repr(C)]
+pub struct Cell {
+    // Inline grapheme storage (4 bytes)
+    // Covers ASCII, Latin-1, CJK, most Unicode
+    grapheme: [u8; 4],
+    
+    // Grapheme metadata (2 bytes)
+    grapheme_len: u8,      // Actual length of UTF-8 in grapheme[]
+    display_width: u8,     // 0=continuation, 1=normal, 2=wide (CJK)
+    
+    // True color (6 bytes)
+    fg: Rgb,               // [u8; 3]
+    bg: Rgb,               // [u8; 3]
+    
+    // Modifiers (1 byte, bitflags)
+    modifiers: Modifiers,  // Bold, Italic, Underline, etc.
+    
+    // Flags (1 byte)
+    flags: CellFlags,      // Overflow indicator, dirty, etc.
+}
+
+// For complex graphemes (emoji ZWJ sequences), we use:
+// flags.OVERFLOW = true
+// grapheme[0..4] = index into overflow HashMap<u32, String>
+```
+
+**Total: 16 bytes** — Fits 2 cells per cache line (64 bytes).
+
+### 4.2 Buffer Layout
+
+```rust
+pub struct Buffer {
+    cells: Vec<Cell>,      // Contiguous, row-major order
+    width: u16,
+    height: u16,
+    overflow: HashMap<u32, String>,  // Rare: complex grapheme spillover
+}
+```
+
+For a 200×50 terminal: `200 × 50 × 16 = 160KB` — Fits entirely in L2 cache.
+
+### 4.3 Color Representation
+
+```rust
+#[repr(C)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct Rgb {
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
+}
+```
+
+True color (24-bit RGB) for precise branding. No palette indirection.
+
+---
+
+## 5. Layout System
+
+### 5.1 Pre-Computed Static Regions
+
+Layouts are computed **once** at initialization or terminal resize. No tree traversal at render time.
+
+```rust
+pub struct Region {
+    pub id: RegionId,
+    pub rect: Rect,
+    pub z_index: u8,           // For overlays
+    pub dirty_generation: u64,  // Invalidation tracking
+}
+
+pub struct Layout {
+    pub regions: Vec<Region>,   // Flat list, no tree
+    pub terminal_size: (u16, u16),
+}
+```
+
+### 5.2 Example Layout
+
+```
+┌─────────────────────────────────────────┐
+│  Region 0: Header (z=0, rarely dirty)   │
+├──────────────┬──────────────────────────┤
+│ Region 1:    │ Region 2:                │
+│ Sidebar      │ Main Content             │
+│ (z=0)        │ (z=0, frequently dirty)  │
+├──────────────┴──────────────────────────┤
+│  Region 3: Input Bar (z=1, overlay)     │
+└─────────────────────────────────────────┘
+```
+
+---
+
+## 6. Diffing Algorithm
+
+```rust
+pub fn render_diff(
+    current: &Buffer,
+    next: &Buffer,
+    dirty_rects: &[Rect],
+    output: &mut Vec<u8>,
+) {
+    let mut last_x: Option<u16> = None;
+    let mut last_y: Option<u16> = None;
+    let mut last_fg: Option<Rgb> = None;
+    let mut last_bg: Option<Rgb> = None;
+    
+    for rect in dirty_rects {
+        for y in rect.y..(rect.y + rect.height) {
+            for x in rect.x..(rect.x + rect.width) {
+                let idx = (y as usize) * (current.width as usize) + (x as usize);
+                let current_cell = &current.cells[idx];
+                let next_cell = &next.cells[idx];
+                
+                if current_cell != next_cell {
+                    // Emit cursor move only if not adjacent
+                    if last_y != Some(y) || last_x.map(|lx| lx + 1) != Some(x) {
+                        write_cursor_move(output, x, y);
+                    }
+                    
+                    // Emit color changes only if different from last
+                    if last_fg != Some(next_cell.fg) {
+                        write_fg_color(output, next_cell.fg);
+                        last_fg = Some(next_cell.fg);
+                    }
+                    if last_bg != Some(next_cell.bg) {
+                        write_bg_color(output, next_cell.bg);
+                        last_bg = Some(next_cell.bg);
+                    }
+                    
+                    // Write grapheme
+                    write_grapheme(output, next_cell);
+                    
+                    last_x = Some(x);
+                    last_y = Some(y);
+                }
+            }
+        }
+    }
+}
+```
+
+---
+
+## 7. Actor Messages
+
+```rust
+pub enum InputEvent {
+    Key(KeyEvent),
+    Mouse(MouseEvent),
+    Resize(u16, u16),
+    Paste(String),
+}
+
+pub enum RenderCommand {
+    Tick,
+    ForceRedraw,
+    Shutdown,
+}
+
+pub enum AgentEvent {
+    TokenReceived(String),
+    StreamStart,
+    StreamEnd,
+    Error(String),
+}
+```
+
+---
+
+## 8. Tech Stack
+
+| Component | Choice | Rationale |
+|-----------|--------|-----------|
+| Language | Rust | Memory safety, zero-cost abstractions |
+| Terminal Backend | `crossterm` | Cross-platform, raw mode, event handling |
+| Concurrency | `crossbeam-channel` | Lock-free MPSC queues |
+| Text Handling | `unicode-width` | Correct grapheme display widths |
+| Benchmarking | `criterion` | Statistical microbenchmarks |
+| FFI | `#[no_mangle] extern "C"` | C bindings for cross-language use |
+
+---
+
+## 9. Target Platforms
+
+| Platform | Terminals | Priority |
+|----------|-----------|----------|
+| macOS | iTerm2, Terminal.app, Kitty, Ghostty | P0 |
+| Linux | Alacritty, Ghostty, GNOME Terminal | P0 |
+| Windows | Windows Terminal, ConPTY | P1 |
+
+---
+
+## 10. Non-Goals (Explicit)
+
+1. **Not a widget library** — We provide primitives, not pre-built components.
+2. **Not a layout engine** — No flexbox, no CSS. Static regions only.
+3. **Not a TUI framework** — No event routing, no state management.
+4. **Not backward compatible with VT100** — We require a modern terminal with true color support.
+
+---
+
+## 11. Success Criteria
+
+The PoC is complete when:
+
+1. ✅ `smoke_test` binary runs with 0 input latency during simulated 100ms "LLM delay"
+2. ✅ `streaming_demo` binary renders 100 tokens/s with 0 flicker
+3. ✅ `cargo bench` shows frame render < 1ms for 200×50 buffer
+4. ✅ Visual inspection in Docker confirms no flicker at max token rate
+5. ✅ C FFI bindings compile and link from a test C program
+</file>
+
+<file path="Cargo.toml">
+[package]
+name = "flywheel"
+version = "0.1.0"
+edition = "2024"
+authors = ["Flywheel Contributors"]
+description = "A zero-flicker terminal compositor for Agentic CLIs"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/flywheel/flywheel"
+keywords = ["terminal", "tui", "compositor", "agent", "cli"]
+categories = ["command-line-interface", "rendering"]
+
+[lib]
+name = "flywheel"
+crate-type = ["lib", "cdylib", "staticlib"]  # cdylib for C FFI
+
+[[example]]
+name = "smoke_test"
+path = "examples/smoke_test.rs"
+
+[[example]]
+name = "streaming_demo"
+path = "examples/streaming_demo.rs"
+
+[[bench]]
+name = "cell_benchmark"
+harness = false
+
+[[bench]]
+name = "diff_benchmark"
+harness = false
+
+[dependencies]
+# Terminal backend
+crossterm = "0.28"
+
+# Concurrency (lock-free channels)
+crossbeam-channel = "0.5"
+
+# Unicode handling
+unicode-width = "0.2"
+unicode-segmentation = "1.12"
+
+# Bitflags for modifiers
+bitflags = "2.6"
+
+[dev-dependencies]
+# Benchmarking
+criterion = { version = "0.5", features = ["html_reports"] }
+sysinfo = "0.30"
+crossbeam-channel = "0.5"
+
+# Property-based testing (optional, for fuzzing)
+# proptest = "1.5"
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[profile.bench]
+lto = true
+codegen-units = 1
+
+[lints.rust]
+# Strict warnings
+unsafe_code = "warn"
+missing_docs = "warn"
+
+[lints.clippy]
+# Pedantic lints for high code quality
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+
+# Specific overrides
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+
+# Performance lints
+inefficient_to_string = "deny"
+large_enum_variant = "warn"
+large_types_passed_by_value = "warn"
+needless_pass_by_value = "warn"
+trivially_copy_pass_by_ref = "warn"
+</file>
+
+<file path="cbindgen.toml">
+# cbindgen configuration for Flywheel C bindings
+
+language = "C"
+
+# Include only the ffi module
+include_guard = "FLYWHEEL_H"
+autogen_warning = "/* WARNING: This file is auto-generated by cbindgen. Do not edit. */"
+
+# Generate documentation
+documentation = true
+documentation_style = "c99"
+
+# Style settings
+braces = "SameLine"
+line_length = 100
+tab_width = 4
+
+# Type naming
+style = "Both"
+
+# Include version info
+after_includes = """
+#define FLYWHEEL_VERSION "0.1.0"
+#define FLYWHEEL_VERSION_MAJOR 0
+#define FLYWHEEL_VERSION_MINOR 1
+#define FLYWHEEL_VERSION_PATCH 0
+"""
+
+[export]
+include = [
+    "FlywheelResult",
+    "FlywheelEventType",
+    "FlywheelKeyEvent",
+    "FlywheelResizeEvent",
+    "FlywheelEvent",
+]
+
+[export.rename]
+"FlywheelEngine" = "FlywheelEngine"
+"FlywheelStream" = "FlywheelStream"
+"FlywheelBuffer" = "FlywheelBuffer"
+
+[fn]
+# Rename pattern for FFI functions
+rename_args = "SnakeCase"
+
+[struct]
+# Derive PartialEq for simple structs
+derive_eq = true
+
+[enum]
+# Use simple integer representation
+rename_variants = "ScreamingSnakeCase"
+</file>
+
+<file path="README.md">
+# Flywheel
+
+**A zero-flicker terminal compositor for Agentic CLIs.**
+
+Flywheel is a high-performance rendering engine designed specifically for streaming LLM outputs in the terminal. It solves the "flickering" problem common in traditional TUI libraries when updating at high frequencies (50+ frames per second).
+
+![License](https://img.shields.io/badge/license-MIT-blue.svg)
+![Status](https://img.shields.io/badge/status-stable-green.svg)
+
+## Why Flywheel?
+
+Traditional TUI libraries (like `ratatui` or `cursive`) are optimized for full-screen application layouts that update sporadically. When used for high-speed text streaming (like an LLM response), they often suffer from:
+
+1.  **Flickering**: Clearing and redrawing the screen causes visual artifacts.
+2.  **Blocking**: Rendering can block the input thread, making the UI unresponsive.
+3.  **Inefficiency**: Re-diffing the entire screen for every new character is wasteful.
+
+Flywheel addresses this with:
+
+-   **Double-buffered Rendering**: Prevents tearing and flickering.
+-   **Optimistic Append**: A "fast path" for appending text that bypasses the diffing engine entirely for zero-latency updates.
+-   **Actor Model**: Input, rendering, and logic run in separate threads.
+-   **Dirty Rectangles**: Only changed regions are re-rendered.
+
+## Features
+
+-   🚀 **High Performance**: Renders 100+ tokens/s seamlessly.
+-   🦀 **Rust Core**: Memory-safe, concurrent, and fast.
+-   🔌 **C FFI**: Bindings for C, C++, Python (via CFFI), Node.js, etc.
+-   🔄 **Input Handling**: Non-blocking keyboard, mouse, and resize events.
+-   📜 **Scroll Buffer**: efficient O(1) scrollback storage.
+
+## Installation
+
+Add this to your `Cargo.toml`:
+
+```toml
+[dependencies]
+flywheel = { git = "https://github.com/yourusername/flywheel.git" }
+```
+
+## Usage (Rust)
+
+```rust
+use flywheel::{Engine, StreamWidget, Rect, AppendResult};
+
+fn main() -> std::io::Result<()> {
+    // Initialize engine (sets up terminal, starts actor threads)
+    let mut engine = Engine::new()?;
+    
+    // Create a streaming widget
+    let mut stream = StreamWidget::new(Rect::new(0, 0, 80, 24));
+    
+    // Append text (automatically handles wrapping and scrolling)
+    stream.append("Hello, ");
+    stream.append("world!");
+    
+    // Use the fast path for high-frequency updates
+    if let AppendResult::FastPath { .. } = stream.append(" Streaming...") {
+        // ... optimized render ...
+    }
+    
+    // Main loop
+    while engine.is_running() {
+        if let Some(event) = engine.poll_input() {
+            // Handle input...
+        }
+        
+        // Render
+        engine.begin_frame();
+        stream.render(engine.buffer_mut());
+        engine.end_frame();
+    }
+    
+    Ok(())
+}
+```
+
+## Usage (C/C++)
+
+```c
+#include "flywheel.h"
+
+int main() {
+    FlywheelEngine* engine = flywheel_engine_new();
+    FlywheelStream* stream = flywheel_stream_new(0, 0, 80, 24);
+
+    flywheel_stream_append(stream, "Hello from C!");
+    flywheel_stream_render(stream, engine);
+    
+    flywheel_engine_request_update(engine);
+    
+    // ...
+    
+    flywheel_stream_destroy(stream);
+    flywheel_engine_destroy(engine);
+    return 0;
+}
+```
+
+## Examples
+
+Run the streaming demo to see it in action:
+
+```bash
+cargo run --example streaming_demo --release
+```
+
+## Architecture
+
+Flywheel uses a 3-stage pipeline:
+
+1.  **Input Actor**: Polls `crossterm` events and sends them to the engine via a channel.
+2.  **Engine (Main Thread)**: Updates application state, handles business logic, and manages the "Next" buffer.
+3.  **Renderer Actor**: Receives render commands, diffs "Next" vs "Current" buffers, and flushes optimized ANSI codes to stdout.
+
+For high-speed streaming, the `StreamWidget` can bypass the diffing stage ("Fast Path") and emit ANSI codes directly for simple appends, falling back to the diffing engine ("Slow Path") only when wrapping or scrolling occurs.
+
+## License
+
+MIT
+</file>
+
+<file path="rustfmt.toml">
+# Flywheel rustfmt configuration
+# Consistent formatting for the entire codebase
+
+edition = "2024"
+
+# Line width
+max_width = 100
+use_small_heuristics = "Default"
+
+# Imports
+imports_granularity = "Module"
+group_imports = "StdExternalCrate"
+reorder_imports = true
+
+# Formatting
+hard_tabs = false
+tab_spaces = 4
+newline_style = "Unix"
+
+# Comments
+wrap_comments = true
+comment_width = 80
+normalize_comments = true
+
+# Functions
+fn_params_layout = "Tall"
+fn_single_line = false
+
+# Match arms
+match_arm_blocks = true
+match_arm_leading_pipes = "Never"
+match_block_trailing_comma = true
+
+# Structs
+struct_lit_single_line = true
+struct_field_align_threshold = 0
+
+# Misc
+use_field_init_shorthand = true
+use_try_shorthand = true
+force_multiline_blocks = false
+</file>
+
+<file path="TRACKER.md">
+# Flywheel Development Tracker
+
+> Living document for tracking progress, decisions, and blockers.
+
+**Last Updated:** 2026-01-29T12:34:00+07:00
+
+---
+
+## Current Phase: ✅ Project Complete
+
+### Phase Overview
+
+| Phase | Name | Status | Target Completion |
+|-------|------|--------|-------------------|
+| 1 | Core Primitives | ✅ Complete | 2026-01-29 |
+| 2 | Diffing Engine | ✅ Complete | 2026-01-29 |
+| 3 | Actor Model | ✅ Complete | 2026-01-29 |
+| 4 | Streaming Widget | ✅ Complete | 2026-01-29 |
+| 5 | C FFI & Polish | ✅ Complete | 2026-01-29 |
+
+---
+
+## Phase 1: Core Primitives ✅
+
+**Goal:** Memory layout decisions locked in, zero allocations in hot path.
+
+### Tasks
+
+| ID | Task | Status | Notes |
+|----|------|--------|-------|
+| 1.1 | Project scaffolding (Cargo.toml, module structure) | ✅ | |
+| 1.2 | `Rgb` color struct | ✅ | 3 bytes, Copy, Eq |
+| 1.3 | `Modifiers` bitflags | ✅ | Bold, Italic, Underline, etc. |
+| 1.4 | `Cell` struct with inline grapheme | ✅ | 16 bytes achieved |
+| 1.5 | `Rect` primitive | ✅ | x, y, width, height |
+| 1.6 | `Buffer` struct (contiguous cells) | ✅ | Row-major, overflow HashMap |
+| 1.7 | `Region` and `Layout` structs | ✅ | Pre-computed static regions |
+| 1.8 | Unit tests for `Cell` equality | ✅ | 25 tests passing |
+| 1.9 | Clippy + rustfmt configuration | ✅ | Strict linting |
+| 1.10 | Benchmark: Cell comparison | ✅ | See results below |
+
+### Benchmark Results (2026-01-29)
+
+| Benchmark | Time | Notes |
+|-----------|------|-------|
+| `cell_eq_diff_grapheme` | 666 ps | < 1ns ✅ (hot path) |
+| `cell_eq_diff_color` | 937 ps | < 1ns ✅ |
+| `cell_eq_same` | 2.17 ns | Full field comparison |
+| `cell_from_char_ascii` | 1.73 ns | |
+| `cell_from_char_cjk` | 2.58 ns | |
+
+### Exit Criteria
+- [x] `cargo test` passes (25 tests)
+- [x] `cargo clippy` — warnings only (const fn suggestions)
+- [x] `cargo bench` shows Cell::eq < 1ns for diff path
+- [x] `std::mem::size_of::<Cell>() == 16`
+
+**Git Commit:** `d5839eb` - feat: Phase 1 - Core primitives (Cell, Buffer, Layout)
+
+---
+
+## Phase 2: Diffing Engine ✅
+
+**Goal:** Minimal ANSI output, single syscall.
+
+### Tasks
+
+| ID | Task | Status | Notes |
+|----|------|--------|-------|
+| 2.1 | `OutputBuffer` struct (pre-allocated Vec<u8>) | ✅ | Used directly in diff functions |
+| 2.2 | ANSI escape sequence helpers | ✅ | emit_cursor_move, emit_fg_color, etc. |
+| 2.3 | `render_diff()` function | ✅ | Current → Next diffing |
+| 2.4 | Cursor movement optimization | ✅ | Skip if adjacent |
+| 2.5 | Color change optimization | ✅ | Skip if same as last |
+| 2.6 | Dirty-rect aware iteration | ✅ | Only diff changed regions |
+| 2.7 | `render_full()` function | ✅ | Full buffer render for initial draw |
+| 2.8 | Benchmark: Full buffer diff | ✅ | 283µs < 500µs target ✓ |
+
+### Benchmark Results (2026-01-29)
+
+| Benchmark | Time | Notes |
+|-----------|------|-------|
+| `diff_200x50_identical` | 26.7 µs | Fast skip path |
+| `diff_200x50_single_change` | 27.2 µs | Minimal output |
+| `diff_200x50_full_change` | 283 µs | < 500µs ✅ |
+| `diff_200x50_line_change` | 27.2 µs | Line update |
+| `render_full_200x50` | 270 µs | Initial draw |
+| `diff_80x24` | 53 µs | Standard terminal |
+| `diff_300x80` | 671 µs | Large terminal |
+
+### Exit Criteria
+- [x] `render_diff()` produces minimal ANSI output
+- [x] Benchmark: 200×50 buffer diff < 500µs (achieved: 283µs)
+- [x] 32 unit tests passing
+
+**Git Commit:** `796a794` - feat: Phase 2 - Diffing engine with dirty-rect support
+
+---
+
+## Phase 3: Actor Model ✅
+
+**Goal:** Non-blocking input, frame timing.
+
+### Tasks
+
+| ID | Task | Status | Notes |
+|----|------|--------|-------|
+| 3.1 | Message types (InputEvent, RenderCommand, AgentEvent) | ✅ | Full keyboard/mouse/resize support |
+| 3.2 | Channel setup (crossbeam MPSC) | ✅ | Bounded channels (64 input, 16 render) |
+| 3.3 | Input thread implementation | ✅ | InputActor with crossterm polling |
+| 3.4 | Render thread implementation | ✅ | RendererActor with double buffering |
+| 3.5 | Main loop coordinator (Engine) | ✅ | Terminal setup, actor spawning, API |
+| 3.6 | `smoke_test` binary | ✅ | Interactive key echo demo |
+| 3.7 | Frame timing | ✅ | 60 FPS target with sleep-based limiting |
+
+### Components
+
+- **`InputActor`**: Dedicated thread polling crossterm events, converts to `InputEvent`
+- **`RendererActor`**: Owns double buffers, receives `RenderCommand`, performs diffing
+- **`Engine`**: Entry point for applications, manages terminal state, coordinates actors
+- **`messages.rs`**: `InputEvent`, `RenderCommand`, `AgentEvent`, `KeyCode`, `KeyModifiers`
+
+### Exit Criteria
+- [x] smoke_test runs with non-blocking input
+- [x] Typing characters appears instantly
+- [x] Frame counter updates at 60 FPS
+- [x] 34 unit tests passing
+
+**Git Commit:** `1399019` - feat: Phase 3 - Actor model with crossbeam channels
+
+## Phase 4: Streaming Widget ✅
+
+**Goal:** Optimistic append fast path.
+
+### Tasks
+
+| ID | Task | Status | Notes |
+|----|------|--------|-------|
+| 4.1 | `StreamWidget` struct | ✅ | Cursor tracking, content buffer |
+| 4.2 | `can_fast_path()` check | ✅ | Width check, no newline, at bottom |
+| 4.3 | Fast path: direct cursor-write | ✅ | Bypass diffing with write_fast_path() |
+| 4.4 | Slow path: dirty-rect fallback | ✅ | Full re-render via append_slow_path() |
+| 4.5 | Line wrapping detection | ✅ | Configurable word_wrap option |
+| 4.6 | Scroll handling / ScrollBuffer | ✅ | Ring buffer with configurable max_scrollback |
+| 4.7 | `streaming_demo` binary | ✅ | 100 tokens/s simulation |
+
+### Components
+
+- **`StreamWidget`**: Main widget with dual-path rendering
+  - `append()`: Auto-selects fast or slow path
+  - `write_fast_path()`: Direct ANSI output bypassing buffers
+  - `render()`: Renders content to buffer for slow path
+- **`ScrollBuffer`**: Ring buffer for scrollback history
+  - O(1) append and scroll operations
+  - Configurable capacity (default: 10,000 lines)
+- **`AppendResult`**: Enum indicating which path was taken
+
+### Exit Criteria
+- [x] Fast path works for simple appends
+- [x] Slow path correctly handles wraps/scrolls
+- [x] streaming_demo runs at 100 tokens/s
+- [x] 44 unit tests passing
+
+**Git Commit:** `4946d98` - feat: Phase 4 - Streaming widget with optimistic append
+
+---
+
+## Phase 5: C FFI & Polish ✅
+
+**Goal:** Cross-language bindings.
+
+### Tasks
+
+| ID | Task | Status | Notes |
+|----|------|--------|-------|
+| 5.1 | Define C API surface | ✅ | Opaque handles for Engine, Stream, Buffer |
+| 5.2 | `#[unsafe(no_mangle)] extern "C"` exports | ✅ | Engine, Widget, and Utility functions |
+| 5.3 | Header file generation | ✅ | `include/flywheel.h` created manually |
+| 5.4 | Test C program linking | ✅ | Validated with GCC and test_ffi.c |
+| 5.5 | Documentation (rustdoc) | ✅ | All public items documented |
+
+### Output
+- `libflywheel.dylib` / `.so` / `.a` (in target/debug or release)
+- `include/flywheel.h` C header file
+
+**Git Commit:** `ac77e30` - feat: Phase 5 - C FFI and Polish
+| 5.6 | README with usage examples | ⬜ | |
+
+### Exit Criteria
+- [ ] C program compiles and links
+- [ ] Basic operations work from C
+- [ ] Documentation complete
+
+---
+
+## Decision Log
+
+| Date | Decision | Rationale |
+|------|----------|-----------|
+| 2026-01-29 | True color (24-bit RGB) over 256-color palette | Brand precision for commercial product |
+| 2026-01-29 | Inline 4-byte grapheme + overflow HashMap | Optimize for 99% case, handle edge cases |
+| 2026-01-29 | Static pre-computed layouts | Agentic CLIs have predictable layouts |
+| 2026-01-29 | crossterm for terminal backend | Cross-platform abstraction |
+
+---
+
+## Blockers
+
+*None currently.*
+
+---
+
+## Notes & Ideas
+
+- Consider `termtosvg` for automated visual regression testing
+- Investigate `io_uring` for async I/O on Linux (future optimization)
+- Profile with `perf` / Instruments once we have the smoke test
+
+---
+
+## Git Checkpoint Strategy
+
+Commit after completing:
+- [ ] Phase 1: `feat: core primitives (Cell, Buffer, Layout)`
+- [ ] Phase 2: `feat: diffing engine with dirty-rect support`
+- [ ] Phase 3: `feat: actor model with crossbeam channels`
+- [ ] Phase 4: `feat: streaming widget with optimistic append`
+- [ ] Phase 5: `feat: C FFI bindings`
+</file>
+
+</files>
