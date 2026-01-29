@@ -34,8 +34,10 @@ pub mod buffer;
 pub mod layout;
 pub mod terminal;
 pub mod actor;
+pub mod widget;
 
 // Re-exports for convenience
 pub use buffer::{Buffer, Cell, CellFlags, Modifiers, Rgb};
 pub use layout::{Layout, Rect, Region, RegionId};
 pub use actor::{Engine, EngineConfig, InputEvent, KeyCode, KeyModifiers, RenderCommand, AgentEvent};
+pub use widget::{StreamWidget, StreamConfig, AppendResult, ScrollBuffer};
