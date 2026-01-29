@@ -1,0 +1,22 @@
+# Rust build artifacts
+/target/
+**/*.rs.bk
+Cargo.lock
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+
+# Benchmark results (keep HTML reports in git if desired)
+# criterion/
+
+# Coverage
+*.profraw
+*.profdata
+coverage/

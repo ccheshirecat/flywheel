@@ -1,0 +1,41 @@
+# Flywheel rustfmt configuration
+# Consistent formatting for the entire codebase
+
+edition = "2024"
+
+# Line width
+max_width = 100
+use_small_heuristics = "Default"
+
+# Imports
+imports_granularity = "Module"
+group_imports = "StdExternalCrate"
+reorder_imports = true
+
+# Formatting
+hard_tabs = false
+tab_spaces = 4
+newline_style = "Unix"
+
+# Comments
+wrap_comments = true
+comment_width = 80
+normalize_comments = true
+
+# Functions
+fn_params_layout = "Tall"
+fn_single_line = false
+
+# Match arms
+match_arm_blocks = true
+match_arm_leading_pipes = "Never"
+match_block_trailing_comma = true
+
+# Structs
+struct_lit_single_line = true
+struct_field_align_threshold = 0
+
+# Misc
+use_field_init_shorthand = true
+use_try_shorthand = true
+force_multiline_blocks = false

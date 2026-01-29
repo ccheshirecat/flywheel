@@ -1,0 +1,80 @@
+[package]
+name = "flywheel"
+version = "0.1.0"
+edition = "2024"
+authors = ["Flywheel Contributors"]
+description = "A zero-flicker terminal compositor for Agentic CLIs"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/flywheel/flywheel"
+keywords = ["terminal", "tui", "compositor", "agent", "cli"]
+categories = ["command-line-interface", "rendering"]
+
+[lib]
+name = "flywheel"
+crate-type = ["lib", "cdylib", "staticlib"]  # cdylib for C FFI
+
+[[example]]
+name = "smoke_test"
+path = "examples/smoke_test.rs"
+
+[[example]]
+name = "streaming_demo"
+path = "examples/streaming_demo.rs"
+
+[[bench]]
+name = "cell_benchmark"
+harness = false
+
+[dependencies]
+# Terminal backend
+crossterm = "0.28"
+
+# Concurrency (lock-free channels)
+crossbeam-channel = "0.5"
+
+# Unicode handling
+unicode-width = "0.2"
+unicode-segmentation = "1.12"
+
+# Bitflags for modifiers
+bitflags = "2.6"
+
+[dev-dependencies]
+# Benchmarking
+criterion = { version = "0.5", features = ["html_reports"] }
+
+# Property-based testing (optional, for fuzzing)
+# proptest = "1.5"
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[profile.bench]
+lto = true
+codegen-units = 1
+
+[lints.rust]
+# Strict warnings
+unsafe_code = "warn"
+missing_docs = "warn"
+
+[lints.clippy]
+# Pedantic lints for high code quality
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+
+# Specific overrides
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+
+# Performance lints
+inefficient_to_string = "deny"
+large_enum_variant = "warn"
+large_types_passed_by_value = "warn"
+needless_pass_by_value = "warn"
+trivially_copy_pass_by_ref = "warn"
