@@ -157,10 +157,14 @@ fn main() -> std::io::Result<()> {
                             width = w;
                             height = h;
                             engine.handle_resize(w, h);
+                            
+                            // Clear the buffer to remove old artifacts
+                            engine.clear();
+                            
                             let new_h = h.saturating_sub(header_height + footer_height);
                             stream.set_bounds(Rect::new(0, header_height, w, new_h));
                             
-                            // Force full redraw to clear old artifacts
+                            // Force full redraw
                             stream.render(engine.buffer_mut());
                             draw_demo_footer(
                                 &mut engine, width, height, &user_input, 
