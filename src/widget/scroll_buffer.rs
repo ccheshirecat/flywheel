@@ -153,6 +153,60 @@ impl ScrollBuffer {
     pub fn current_line_len(&self) -> usize {
         self.current_line().content.len()
     }
+
+    /// Rewrap all content to a new width.
+    ///
+    /// This is called when the widget bounds change to ensure content
+    /// displays correctly at the new width.
+    pub fn rewrap(&mut self, new_width: usize) {
+        if new_width == 0 {
+            return;
+        }
+
+        // Collect all content into logical lines (merging soft-wrapped lines)
+        let mut logical_lines: Vec<Vec<Cell>> = Vec::new();
+        let mut current_logical: Vec<Cell> = Vec::new();
+
+        for line in &self.lines {
+            current_logical.extend(line.content.iter().copied());
+            if !line.wrapped {
+                // Hard newline - end of logical line
+                logical_lines.push(std::mem::take(&mut current_logical));
+            }
+        }
+        // Don't forget the last line if it didn't end with a newline
+        if !current_logical.is_empty() || logical_lines.is_empty() {
+            logical_lines.push(current_logical);
+        }
+
+        // Re-wrap logical lines to new width
+        self.lines.clear();
+        for logical in logical_lines {
+            if logical.is_empty() {
+                self.lines.push_back(StyledLine::empty());
+            } else {
+                let chunks: Vec<_> = logical.chunks(new_width).collect();
+                let chunk_count = chunks.len();
+                for (i, chunk) in chunks.into_iter().enumerate() {
+                    let wrapped = i < chunk_count - 1;
+                    self.lines.push_back(StyledLine::new(chunk.to_vec(), wrapped));
+                }
+            }
+        }
+
+        // Ensure we always have at least one line
+        if self.lines.is_empty() {
+            self.lines.push_back(StyledLine::empty());
+        }
+
+        // Trim to max_lines if needed
+        while self.lines.len() > self.max_lines {
+            self.lines.pop_front();
+        }
+
+        // Reset scroll to bottom after rewrap
+        self.scroll_offset = 0;
+    }
 }
 
 #[cfg(test)]

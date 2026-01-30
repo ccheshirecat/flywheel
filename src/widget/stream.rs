@@ -127,10 +127,18 @@ impl StreamWidget {
     }
 
     /// Set new bounds for the widget.
+    ///
+    /// If the width changes, content will be rewrapped to fit the new width.
     pub fn set_bounds(&mut self, bounds: Rect) {
         if bounds != self.bounds {
+            let width_changed = bounds.width != self.bounds.width;
             self.bounds = bounds;
             self.needs_full_redraw = true;
+            
+            // Rewrap content if width changed
+            if width_changed && bounds.width > 0 {
+                self.content.rewrap(bounds.width as usize);
+            }
         }
     }
 

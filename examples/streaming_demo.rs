@@ -159,6 +159,14 @@ fn main() -> std::io::Result<()> {
                             engine.handle_resize(w, h);
                             let new_h = h.saturating_sub(header_height + footer_height);
                             stream.set_bounds(Rect::new(0, header_height, w, new_h));
+                            
+                            // Force full redraw to clear old artifacts
+                            stream.render(engine.buffer_mut());
+                            draw_demo_footer(
+                                &mut engine, width, height, &user_input, 
+                                &status_line, footer_bg, frame_count
+                            );
+                            engine.request_redraw();
                         }
                         InputEvent::Shutdown => engine.stop(),
                         _ => {}
