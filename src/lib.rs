@@ -46,5 +46,10 @@ pub mod ffi;
 pub use buffer::{Buffer, Cell, CellFlags, Modifiers, Rgb};
 pub use layout::{Layout, Rect, Region, RegionId};
 pub use actor::{Engine, EngineConfig, InputEvent, KeyCode, KeyModifiers, RenderCommand, AgentEvent, TickerActor, Tick};
-pub use widget::{StreamWidget, StreamConfig, AppendResult, ScrollBuffer};
+pub use widget::{
+    Widget, StreamWidget, StreamConfig, AppendResult, ScrollBuffer,
+    TextInput, TextInputConfig,
+    StatusBar, StatusBarConfig,
+    ProgressBar, ProgressBarConfig, ProgressStyle,
+};
 

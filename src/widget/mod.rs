@@ -1,32 +1,51 @@
-//! Streaming Widget: Optimistic append for high-frequency token streaming.
+//! Widget System: Composable UI components for terminal applications.
 //!
-//! This module implements a specialized widget for displaying streaming text
-//! from LLM agents at 100+ tokens per second without flickering.
+//! This module provides a collection of widgets that implement the [`Widget`] trait,
+//! allowing them to be composed into complex layouts and rendered to the terminal.
 //!
-//! # Architecture
+//! # Available Widgets
 //!
-//! The streaming widget uses two rendering paths:
+//! - [`StreamWidget`] - Scrolling text viewport for streaming content (LLM output)
+//! - [`TextInput`] - Single-line text input with cursor
+//! - [`StatusBar`] - Three-section status bar (left, center, right)
+//! - [`ProgressBar`] - Horizontal progress indicator
 //!
-//! 1. **Fast Path**: When appending text that fits on the current line without
-//!    wrapping or scrolling, we bypass the full diffing engine and emit direct
-//!    ANSI sequences for the new characters. This is the common case.
+//! # Widget Trait
 //!
-//! 2. **Slow Path**: When text wraps to a new line or causes scrolling, we
-//!    mark the affected region as dirty and let the diffing engine handle it.
+//! All widgets implement the [`Widget`] trait, which provides:
+//! - `bounds()` / `set_bounds()` - Layout management
+//! - `render(&mut Buffer)` - Draw to the buffer
+//! - `handle_input(&InputEvent) -> bool` - Input handling
+//! - `needs_redraw()` / `clear_redraw()` - Dirty tracking
 //!
 //! # Example
 //!
 //! ```rust,ignore
-//! use flywheel::widget::StreamWidget;
+//! use flywheel::widget::{Widget, TextInput, StatusBar};
+//! use flywheel::Rect;
 //!
-//! let mut stream = StreamWidget::new(Rect::new(0, 0, 80, 24));
-//! stream.append("Hello, ");
-//! stream.append("world!\n");
-//! stream.append("Streaming tokens...");
+//! let mut input = TextInput::new(Rect::new(0, 23, 80, 1));
+//! let mut status = StatusBar::new(Rect::new(0, 0, 80, 1));
+//!
+//! status.set_all("Flywheel", "v0.1.0", "60 FPS");
+//! input.set_content("Hello, world!");
+//!
+//! // Render both widgets
+//! input.render(buffer);
+//! status.render(buffer);
 //! ```
 
+mod traits;
 mod stream;
 mod scroll_buffer;
+mod text_input;
+mod status_bar;
+mod progress_bar;
 
+pub use traits::Widget;
 pub use stream::{StreamWidget, StreamConfig, AppendResult};
 pub use scroll_buffer::ScrollBuffer;
+pub use text_input::{TextInput, TextInputConfig};
+pub use status_bar::{StatusBar, StatusBarConfig};
+pub use progress_bar::{ProgressBar, ProgressBarConfig, ProgressStyle};
+
