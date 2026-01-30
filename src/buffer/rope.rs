@@ -27,18 +27,18 @@ impl Chunk {
     }
 
     /// Check if the chunk is full.
-    fn is_full(&self) -> bool {
+    const fn is_full(&self) -> bool {
         self.lines.len() >= CHUNK_SIZE
     }
 
     /// Get the number of lines in this chunk.
-    fn len(&self) -> usize {
+    const fn len(&self) -> usize {
         self.lines.len()
     }
 
     /// Check if the chunk is empty.
     #[allow(dead_code)]
-    fn is_empty(&self) -> bool {
+    const fn is_empty(&self) -> bool {
         self.lines.is_empty()
     }
 
@@ -69,12 +69,12 @@ pub struct ChunkedLine {
 
 impl ChunkedLine {
     /// Create a new line with the given content.
-    pub fn new(content: Vec<Cell>, wrapped: bool) -> Self {
+    pub const fn new(content: Vec<Cell>, wrapped: bool) -> Self {
         Self { content, wrapped }
     }
 
     /// Create an empty line.
-    pub fn empty() -> Self {
+    pub const fn empty() -> Self {
         Self {
             content: Vec::new(),
             wrapped: false,
@@ -82,12 +82,12 @@ impl ChunkedLine {
     }
 
     /// Get the number of cells in this line.
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.content.len()
     }
 
     /// Check if the line is empty.
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.content.is_empty()
     }
 }
@@ -135,17 +135,17 @@ impl RopeBuffer {
     }
 
     /// Get the total number of lines.
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.total_lines
     }
 
     /// Check if the buffer is empty.
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.total_lines == 0
     }
 
     /// Get the number of chunks.
-    pub fn chunk_count(&self) -> usize {
+    pub const fn chunk_count(&self) -> usize {
         self.chunks.len()
     }
 
@@ -189,7 +189,7 @@ impl RopeBuffer {
     /// Push a new line to the buffer.
     pub fn push_line(&mut self, line: ChunkedLine) {
         // Check if we need a new chunk
-        if self.chunks.is_empty() || self.chunks.last().map_or(true, Chunk::is_full) {
+        if self.chunks.is_empty() || self.chunks.last().is_none_or(Chunk::is_full) {
             self.chunks.push(Chunk::new());
         }
 
@@ -226,7 +226,7 @@ impl RopeBuffer {
     }
 
     /// Get the current scroll offset.
-    pub fn scroll_offset(&self) -> usize {
+    pub const fn scroll_offset(&self) -> usize {
         self.scroll_offset
     }
 
@@ -237,18 +237,18 @@ impl RopeBuffer {
     }
 
     /// Scroll down by the given number of lines.
-    pub fn scroll_down(&mut self, lines: usize) {
+    pub const fn scroll_down(&mut self, lines: usize) {
         self.scroll_offset = self.scroll_offset.saturating_sub(lines);
     }
 
     /// Scroll to the bottom (most recent content).
-    pub fn scroll_to_bottom(&mut self) {
+    pub const fn scroll_to_bottom(&mut self) {
         self.scroll_offset = 0;
     }
 
     /// Iterate over lines in the visible range.
     ///
-    /// Returns an iterator over (line_index, &ChunkedLine) for lines
+    /// Returns an iterator over (`line_index`, &`ChunkedLine`) for lines
     /// that should be visible given the viewport height.
     pub fn visible_lines(&self, viewport_height: usize) -> impl Iterator<Item = (usize, &ChunkedLine)> {
         let end = self.total_lines.saturating_sub(self.scroll_offset);
@@ -259,7 +259,7 @@ impl RopeBuffer {
         })
     }
 
-    /// Trim lines from the front to stay within max_lines.
+    /// Trim lines from the front to stay within `max_lines`.
     fn trim_front(&mut self) {
         while self.total_lines > self.max_lines && !self.chunks.is_empty() {
             // Remove the first chunk

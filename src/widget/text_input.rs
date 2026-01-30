@@ -280,9 +280,11 @@ impl Widget for TextInput {
             // Draw cursor at end if needed
             #[allow(clippy::cast_possible_truncation)]
             let cursor_visual_pos = cursor_char_pos.saturating_sub(scroll_offset) as u16;
+            #[allow(clippy::cast_possible_truncation)]
+            let text_width_u16 = text_width as u16;
             if self.focused 
                 && cursor_char_pos == content_chars.len() 
-                && cursor_visual_pos < text_width as u16
+                && cursor_visual_pos < text_width_u16
                 && self.frame % 30 < 15
             {
                 let cx = text_start + cursor_visual_pos;
