@@ -335,6 +335,9 @@ pub fn render_full(buffer: &Buffer, output: &mut Vec<u8>) {
     // Hide cursor during redraw
     output.extend_from_slice(b"\x1b[?25l");
 
+    // Clear entire screen (fixes resize artifacts)
+    output.extend_from_slice(b"\x1b[2J");
+
     // Move to home
     output.extend_from_slice(b"\x1b[H");
 
@@ -508,8 +511,8 @@ mod tests {
         render_full(&buffer, &mut output);
 
         let output_str = String::from_utf8_lossy(&output);
-        // Should start with hide cursor and home
-        assert!(output_str.starts_with("\x1b[?25l\x1b[H"));
+        // Should start with hide cursor, clear screen, and home
+        assert!(output_str.starts_with("\x1b[?25l\x1b[2J\x1b[H"));
         // Should contain all characters
         assert!(output_str.contains('A'));
         assert!(output_str.contains('B'));
