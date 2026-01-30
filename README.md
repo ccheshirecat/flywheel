@@ -421,15 +421,56 @@ int main() {
 
 ## Performance
 
-Benchmarked on Apple M1 Pro (macOS 14):
+Benchmarked on Apple Silicon (criterion, release build):
 
-| Metric | Value |
-|--------|-------|
-| **Throughput** | 50,000+ characters/second |
-| **Input Latency** | < 1ms (event-driven loop) |
-| **Memory (80x24)** | ~8 KB per buffer |
-| **Memory (200x50)** | ~40 KB per buffer |
-| **CPU Usage** | < 5% at 60 FPS idle |
+### Cell Operations
+
+| Operation | Time |
+|-----------|------|
+| Cell equality (same) | 2.09 ns |
+| Cell equality (diff grapheme) | 650 ps |
+| Cell equality (diff color) | 921 ps |
+| Cell from ASCII char | 1.73 ns |
+| Cell from CJK char | 2.56 ns |
+
+### Buffer Diffing (200×50 = 10,000 cells)
+
+| Scenario | Time | Notes |
+|----------|------|-------|
+| Identical buffers | 33.3 µs | No-op diff |
+| Single cell change | 33.6 µs | Minimal output |
+| Line change (200 cells) | 33.7 µs | Optimized cursor moves |
+| Full change (10K cells) | 289 µs | ~2.9M cells/second |
+| Full render | 318 µs | No diffing |
+
+### RopeBuffer (Chunked Storage)
+
+| Operation | Time | Notes |
+|-----------|------|-------|
+| Append single char | 2.69 ns | O(1) amortized |
+| Newline | 9.29 ns | Creates new line |
+| Append 80 cells | 178 ns | Full line |
+| Push complete line | 93 ns | Pre-built line |
+| Get line (50K lines) | 537 ps | O(1) chunk lookup |
+| Visible lines iterator | 194 ns | 50 lines |
+| Push 100K lines | 404 µs | ~247M lines/second |
+
+### Scaling
+
+| Buffer Size | Diff Time (full change) |
+|-------------|-------------------------|
+| 80×24 (1,920 cells) | 55 µs |
+| 120×40 (4,800 cells) | 140 µs |
+| 200×50 (10,000 cells) | 291 µs |
+| 300×80 (24,000 cells) | 693 µs |
+
+### Run Benchmarks
+
+```bash
+cargo bench --bench cell_benchmark
+cargo bench --bench diff_benchmark
+cargo bench --bench rope_benchmark
+```
 
 ---
 
@@ -442,15 +483,26 @@ Benchmarked on Apple M1 Pro (macOS 14):
 | Fast Path optimization | ✅ | ❌ | N/A |
 | Sticky scroll | ✅ | ❌ | N/A |
 | Actor-based rendering | ✅ | ❌ | ❌ |
+| Widget system | ✅ | ✅ | ❌ |
+| RopeBuffer (1M+ lines) | ✅ | ❌ | N/A |
 | C FFI | ✅ | ❌ | ❌ |
 
 ---
 
 ## Roadmap
 
-- [ ] **V1.1**: WASM target for browser terminals
-- [ ] **V1.2**: Plugin system for custom widgets
-- [ ] **V2.0**: Rope-based `ScrollBuffer` for 1M+ line documents
+### V2.0 ✅ Complete
+- [x] Buffer synchronization fix (ghost character elimination)
+- [x] Async-friendly TickerActor
+- [x] RopeBuffer for 1M+ line documents
+- [x] Widget system (TextInput, StatusBar, ProgressBar)
+- [x] Comprehensive documentation and benchmarks
+
+### Future
+- [ ] **V2.1**: Layout containers (VSplit, HSplit, Stack)
+- [ ] **V2.2**: Focus management system
+- [ ] **V3.0**: WASM target for browser terminals
+- [ ] **V3.1**: Plugin system for custom widgets
 
 ---
 

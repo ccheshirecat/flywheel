@@ -29,6 +29,10 @@ harness = false
 name = "diff_benchmark"
 harness = false
 
+[[bench]]
+name = "rope_benchmark"
+harness = false
+
 [dependencies]
 # Terminal backend
 crossterm = "0.28"
