@@ -6,11 +6,15 @@
 //! - [`Rgb`]: True-color representation
 //! - [`Modifiers`]: Text style bitflags
 //! - [`diff`]: Diffing engine for generating minimal ANSI sequences
+//! - [`rope`]: Rope-based buffer for efficient large document storage
 
 mod cell;
 #[allow(clippy::module_inception)]
 mod buffer;
 pub mod diff;
+pub mod rope;
 
 pub use cell::{Cell, CellFlags, Modifiers, Rgb};
 pub use buffer::Buffer;
+pub use rope::{RopeBuffer, ChunkedLine, RopeMemoryStats};
+
