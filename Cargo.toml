@@ -33,6 +33,10 @@ harness = false
 name = "rope_benchmark"
 harness = false
 
+[[bench]]
+name = "comparison_benchmark"
+harness = false
+
 [dependencies]
 # Terminal backend
 crossterm = "0.28"
@@ -52,6 +56,9 @@ bitflags = "2.6"
 criterion = { version = "0.5", features = ["html_reports"] }
 sysinfo = "0.30"
 crossbeam-channel = "0.5"
+
+# Comparison benchmarks
+ratatui = "0.29"
 
 # Property-based testing (optional, for fuzzing)
 # proptest = "1.5"

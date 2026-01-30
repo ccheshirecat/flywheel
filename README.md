@@ -53,7 +53,7 @@ Building an "AI coding assistant" CLI that streams LLM responses directly to the
 
 ```toml
 [dependencies]
-flywheel = { git = "https://github.com/yourusername/flywheel.git" }
+flywheel = { git = "https://github.com/ccheshirecat/flywheel.git" }
 ```
 
 ### Minimal Example
@@ -470,7 +470,22 @@ Benchmarked on Apple Silicon (criterion, release build):
 cargo bench --bench cell_benchmark
 cargo bench --bench diff_benchmark
 cargo bench --bench rope_benchmark
+cargo bench --bench comparison_benchmark  # Flywheel vs Ratatui
 ```
+
+### Flywheel vs Ratatui (Head-to-Head)
+
+| Operation | Flywheel | Ratatui | Speedup |
+|-----------|----------|---------|---------|
+| **Buffer Creation (80×24)** | 546 ns | 2.02 µs | **3.7×** |
+| **Buffer Creation (200×50)** | 3.17 µs | 9.96 µs | **3.1×** |
+| **Cell Write** | 1.32 ns | 1.53 ns | **1.2×** |
+| **Buffer Fill (80×24)** | 796 ns | 3.20 µs | **4.0×** |
+| **Buffer Fill (200×50)** | 4.17 µs | 16.1 µs | **3.9×** |
+| **Buffer Diff (80×24)** | 8.05 µs | 21.6 µs | **2.7×** |
+| **Buffer Diff (200×50)** | 39.2 µs | 109 µs | **2.8×** |
+| **Cell Clone/Copy** | 1.77 ns | 2.03 ns | **1.1×** |
+| **Text Render (47 chars)** | 91.1 ns | 137 ns | **1.5×** |
 
 ---
 
