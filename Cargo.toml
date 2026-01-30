@@ -1,11 +1,12 @@
 [package]
-name = "flywheel"
+name = "flywheel-compositor"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 authors = ["Flywheel Contributors"]
 description = "A zero-flicker terminal compositor for Agentic CLIs"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/flywheel/flywheel"
+repository = "https://github.com/ccheshirecat/flywheel"
+readme = "README.md"
 keywords = ["terminal", "tui", "compositor", "agent", "cli"]
 categories = ["command-line-interface", "rendering"]
 

@@ -53,7 +53,7 @@ Building an "AI coding assistant" CLI that streams LLM responses directly to the
 
 ```toml
 [dependencies]
-flywheel = { git = "https://github.com/ccheshirecat/flywheel.git" }
+flywheel-compositor = "0.1"
 ```
 
 ### Minimal Example

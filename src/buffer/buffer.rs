@@ -164,10 +164,11 @@ impl Buffer {
         self.cells[idx] = cell;
 
         // Handle wide characters (CJK)
-        if width == 2
-            && let Some(next_idx) = self.index_of(x + 1, y) {
+        if width == 2 {
+            if let Some(next_idx) = self.index_of(x + 1, y) {
                 self.cells[next_idx] = Cell::wide_continuation().with_bg(bg);
             }
+        }
 
         width
     }

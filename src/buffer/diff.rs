@@ -299,11 +299,10 @@ fn emit_modifier_set(output: &mut Vec<u8>, modifiers: Modifiers) {
 fn emit_grapheme(output: &mut Vec<u8>, cell: &Cell, buffer: &Buffer) {
     if cell.flags().contains(CellFlags::OVERFLOW) {
         // Look up in overflow storage
-        if let Some(idx) = cell.overflow_index()
-            && let Some(grapheme) = buffer.get_overflow(idx) {
-                output.extend_from_slice(grapheme.as_bytes());
-                return;
-            }
+        if let Some(grapheme) = cell.overflow_index().and_then(|idx| buffer.get_overflow(idx)) {
+            output.extend_from_slice(grapheme.as_bytes());
+            return;
+        }
         // Fallback: emit a replacement character
         output.extend_from_slice("�".as_bytes());
     } else if let Some(grapheme) = cell.grapheme() {
