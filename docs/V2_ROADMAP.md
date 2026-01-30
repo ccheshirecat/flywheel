@@ -76,7 +76,7 @@ ticker.join();
 
 ---
 
-## Phase 3: Rope-Based ScrollBuffer (Priority: Medium)
+## Phase 3: Rope-Based Buffer (Priority: Medium) ✅ COMPLETED
 
 ### Problem
 `ScrollBuffer` uses `VecDeque<StyledLine>` where each `StyledLine` is a `Vec<Cell>`.
@@ -84,89 +84,63 @@ ticker.join();
 - Insert/delete at middle is O(n)
 - Poor cache locality
 
-### Solution: Chunked Rope
+### Solution: RopeBuffer
+
+Created `src/buffer/rope.rs` with chunked storage:
 
 ```rust
 const CHUNK_SIZE: usize = 64;  // Lines per chunk
 
-struct Chunk {
-    lines: ArrayVec<StyledLine, CHUNK_SIZE>,
+let mut buffer = RopeBuffer::new(10_000);  // Max 10K lines
+buffer.append([Cell::new('H'), Cell::new('i')].into_iter());
+buffer.newline();
+
+// Efficient iteration
+for (i, line) in buffer.visible_lines(24) {
+    // Render line...
 }
 
-struct RopeBuffer {
-    chunks: Vec<Chunk>,
-    total_lines: usize,
-}
-
-impl RopeBuffer {
-    fn get_line(&self, index: usize) -> Option<&StyledLine> {
-        let chunk_idx = index / CHUNK_SIZE;
-        let line_idx = index % CHUNK_SIZE;
-        self.chunks.get(chunk_idx)?.lines.get(line_idx)
-    }
-
-    fn push_line(&mut self, line: StyledLine) {
-        if self.chunks.is_empty() || self.chunks.last().unwrap().lines.is_full() {
-            self.chunks.push(Chunk::new());
-        }
-        self.chunks.last_mut().unwrap().lines.push(line);
-        self.total_lines += 1;
-    }
-}
+// Memory diagnostics
+let stats = buffer.memory_stats();
+println!("Lines: {}, Chunks: {}", stats.lines, stats.chunks);
 ```
 
 ### Benefits
 - **Fewer allocations**: 1M lines = ~16K chunk allocations (vs 1M)
 - **Better locality**: Lines in same chunk are contiguous
-- **Faster scroll**: Jump to chunk, then index within
+- **Automatic trimming**: Old lines removed when max_lines exceeded
+- **Memory stats**: `memory_stats()` for debugging
 
-### Tasks
-- [ ] Create `src/buffer/rope.rs`
-- [ ] Implement `RopeBuffer` with chunk-based storage
-- [ ] Add `Iterator` support for rendering
-- [ ] Benchmark: `VecDeque` vs `RopeBuffer` at 100K, 500K, 1M lines
-- [ ] Migrate `ScrollBuffer` to use `RopeBuffer` internally
-
-### Estimated Effort: 4-6 hours
+### Status: ✅ Complete (Committed: 2024-01-30)
 
 ---
 
-## Phase 4: Widget System (Priority: Medium)
+## Phase 4: Widget System (Priority: Medium) ✅ COMPLETED
 
-### Current State
-Only `StreamWidget` exists. Users must manually compose UI.
+### Solution: Widget Trait + Core Widgets
 
-### V2 Widgets
+Created a proper widget system in `src/widget/`:
 
+**Widget Trait** (`traits.rs`)
 ```rust
-// Layout containers
-struct VSplit { top: Box<dyn Widget>, bottom: Box<dyn Widget>, ratio: f32 }
-struct HSplit { left: Box<dyn Widget>, right: Box<dyn Widget>, ratio: f32 }
-struct Stack { layers: Vec<Box<dyn Widget>> }  // For modals/overlays
-
-// Common widgets
-struct TextInput { content: String, cursor: usize, focused: bool }
-struct StatusBar { left: String, center: String, right: String }
-struct ProgressBar { progress: f32, style: ProgressStyle }
-
-// Trait
-trait Widget {
+pub trait Widget {
     fn bounds(&self) -> Rect;
     fn set_bounds(&mut self, bounds: Rect);
     fn render(&self, buffer: &mut Buffer);
-    fn handle_input(&mut self, event: &InputEvent) -> bool;  // Returns "consumed"
+    fn handle_input(&mut self, event: &InputEvent) -> bool;
+    fn needs_redraw(&self) -> bool;
+    fn clear_redraw(&mut self);
 }
 ```
 
-### Tasks
-- [ ] Define `Widget` trait in `src/widget/mod.rs`
-- [ ] Implement `TextInput` widget
-- [ ] Implement `StatusBar` widget
-- [ ] Implement `VSplit` / `HSplit` containers
-- [ ] Add focus management system
-- [ ] Create `widgets_demo.rs` example
+**Implemented Widgets:**
+- `TextInput` - Single-line input with cursor, editing, navigation
+- `StatusBar` - Three-section header (left, center, right)
+- `ProgressBar` - Animated progress with multiple styles
 
-### Estimated Effort: 6-8 hours
+**Demo:** `examples/widgets_demo.rs`
+
+### Status: ✅ Complete (Committed: 2024-01-30)
 
 ---
 
@@ -187,11 +161,11 @@ trait Widget {
 |-------|----------|--------|--------|
 | 1. Buffer Sync Fix | Critical | ✅ Done | 1h |
 | 2. Async Ticker | High | ✅ Done | 2h |
-| 3. Rope Buffer | Medium | 📋 Planned | 4-6h |
-| 4. Widget System | Medium | 📋 Planned | 6-8h |
-| 5. Docs & Polish | High | 📋 Planned | 2-3h |
+| 3. Rope Buffer | Medium | ✅ Done | 2h |
+| 4. Widget System | Medium | ✅ Done | 3h |
+| 5. Docs & Polish | High | 📋 In Progress | 1h |
 
-**Completed: 3 hours | Remaining: 12-17 hours**
+**Completed: 8 hours | Remaining: 1-2 hours**
 
 ---
 

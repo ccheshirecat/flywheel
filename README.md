@@ -247,11 +247,124 @@ match event {
 
 ---
 
+## V2 Widgets
+
+Flywheel V2 introduces a proper widget system with composable UI components.
+
+### `TextInput`
+
+Single-line text input with cursor, editing, and navigation:
+
+```rust
+use flywheel::{TextInput, Widget, Rect};
+
+let mut input = TextInput::new(Rect::new(0, 23, 80, 1));
+
+// Configure
+input.set_content("Initial text");
+input.set_focused(true);
+
+// Handle input events
+if input.handle_input(&event) {
+    // Event was consumed by the widget
+}
+
+// Render
+input.render(buffer);
+
+// Get content
+let text = input.content();
+```
+
+### `StatusBar`
+
+Three-section status bar (left, center, right):
+
+```rust
+use flywheel::{StatusBar, Widget, Rect};
+
+let mut status = StatusBar::new(Rect::new(0, 0, 80, 1));
+status.set_all("Flywheel", "v2.0", "60 FPS");
+
+// Or set individually
+status.set_left("App Name");
+status.set_center("Status");
+status.set_right("12:34");
+
+status.render(buffer);
+```
+
+### `ProgressBar`
+
+Animated horizontal progress indicator:
+
+```rust
+use flywheel::{ProgressBar, Widget, Rect, ProgressStyle};
+
+let mut progress = ProgressBar::new(Rect::new(0, 5, 60, 1));
+progress.set_progress(0.5);  // 50%
+progress.set_label("Loading");
+progress.increment(0.1);     // +10%
+
+progress.render(buffer);
+```
+
+### Widget Trait
+
+All widgets implement the `Widget` trait:
+
+```rust
+pub trait Widget {
+    fn bounds(&self) -> Rect;
+    fn set_bounds(&mut self, bounds: Rect);
+    fn render(&self, buffer: &mut Buffer);
+    fn handle_input(&mut self, event: &InputEvent) -> bool;
+    fn needs_redraw(&self) -> bool;
+    fn clear_redraw(&mut self);
+}
+```
+
+---
+
 ## Examples
 
-### Event-Driven Loop (Recommended)
+### Event-Driven Loop with TickerActor (Recommended)
 
-For the lowest possible input latency:
+Use the V2 `TickerActor` for non-blocking frame pacing:
+
+```rust
+use flywheel::{Engine, TickerActor, InputEvent, KeyCode};
+use crossbeam_channel::select;
+use std::time::Duration;
+
+let engine = Engine::new()?;
+let ticker = TickerActor::spawn(Duration::from_micros(16_666)); // 60 FPS
+
+while engine.is_running() {
+    select! {
+        recv(engine.input_receiver()) -> result => {
+            if let Ok(event) = result {
+                match event {
+                    InputEvent::Key { code: KeyCode::Esc, .. } => engine.stop(),
+                    _ => handle_input(event),
+                }
+            }
+        }
+        recv(ticker.receiver()) -> _ => {
+            // Tick: generate content, update animations
+            generate_content(&mut stream);
+            stream.render(engine.buffer_mut());
+            engine.request_update();
+        }
+    }
+}
+
+ticker.join();
+```
+
+### Legacy Event Loop
+
+For simpler applications without the ticker:
 
 ```rust
 use crossbeam_channel::RecvTimeoutError;
