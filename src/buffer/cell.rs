@@ -325,15 +325,12 @@ impl Cell {
     /// Returns `None` if this is an overflow cell (caller should check `is_overflow()`
     /// and look up the grapheme in the overflow storage).
     #[inline]
-    #[allow(unsafe_code)]
     pub fn grapheme(&self) -> Option<&str> {
         if self.flags.contains(CellFlags::OVERFLOW) {
             return None;
         }
-        // SAFETY: We only store valid UTF-8 in the grapheme bytes
-        Some(unsafe {
-            std::str::from_utf8_unchecked(&self.grapheme[..self.grapheme_len as usize])
-        })
+        // Safe UTF-8 conversion - we validate on input
+        std::str::from_utf8(&self.grapheme[..self.grapheme_len as usize]).ok()
     }
 
     /// Get the overflow index if this is an overflow cell.

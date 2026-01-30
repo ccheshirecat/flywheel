@@ -42,7 +42,7 @@ Building an "AI coding assistant" CLI that streams LLM responses directly to the
 | 🎯 **Fast Path Optimization** | For simple character appends, bypass the buffer entirely—emit ANSI codes directly. |
 | 📜 **Infinite Scrollback** | `StreamWidget` stores 100k+ lines efficiently with "sticky scroll" UX. |
 | 🎨 **True Color (24-bit RGB)** | Full RGB attribute support for syntax highlighting and theming. |
-| 🦀 **100% Safe Rust** | No `unsafe` blocks. Memory-safe concurrency with `crossbeam` channels. |
+| 🦀 **Safe Rust Core** | Core library is `#![forbid(unsafe_code)]`. FFI module uses `unsafe` as required by C ABI. |
 | 🔌 **C FFI** | Stable `extern "C"` interface for Python, Node.js, Go, and C/C++ bindings. |
 
 ---

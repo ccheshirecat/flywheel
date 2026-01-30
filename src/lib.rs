@@ -27,6 +27,7 @@
 #![warn(missing_docs)]
 #![warn(clippy::pedantic)]
 #![warn(clippy::nursery)]
+#![deny(unsafe_code)]  // Core library denies unsafe - only FFI module may allow it
 #![allow(clippy::module_name_repetitions)]
 #![allow(clippy::must_use_candidate)]
 #![allow(clippy::similar_names)]
