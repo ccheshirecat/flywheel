@@ -52,5 +52,6 @@ pub use widget::{
     TextInput, TextInputConfig,
     StatusBar, StatusBarConfig,
     ProgressBar, ProgressBarConfig, ProgressStyle,
+    Terminal,
 };
 

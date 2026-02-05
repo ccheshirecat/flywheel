@@ -41,6 +41,7 @@ mod scroll_buffer;
 mod text_input;
 mod status_bar;
 mod progress_bar;
+mod terminal;
 
 pub use traits::Widget;
 pub use stream::{StreamWidget, StreamConfig, AppendResult};
@@ -48,4 +49,5 @@ pub use scroll_buffer::ScrollBuffer;
 pub use text_input::{TextInput, TextInputConfig};
 pub use status_bar::{StatusBar, StatusBarConfig};
 pub use progress_bar::{ProgressBar, ProgressBarConfig, ProgressStyle};
+pub use terminal::Terminal;
 

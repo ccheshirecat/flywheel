@@ -51,6 +51,9 @@ unicode-segmentation = "1.12"
 
 # Bitflags for modifiers
 bitflags = "2.6"
+ 
+# VT100 Emulation
+vt100 = "0.15"
 
 [dev-dependencies]
 # Benchmarking
