@@ -1,6 +1,6 @@
 [package]
 name = "flywheel-compositor"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2021"
 authors = ["Flywheel Contributors"]
 description = "A zero-flicker terminal compositor for Agentic CLIs"
