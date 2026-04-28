@@ -1,3 +1,5 @@
+<a href="https://chaser.sh"><img src="banner.png" alt="Chaser — The Infrastructure Platform" width="100%"/></a>
+
 <p align="center">
   <h1 align="center">Flywheel</h1>
   <p align="center">
@@ -5,6 +7,7 @@
   </p>
   <p align="center">
     A high-performance, Rust-native rendering engine purpose-built for streaming LLM outputs at 60+ FPS without tearing, flickering, or input lag.
+    <br/>The terminal compositor behind the <a href="https://chaser.sh">Chaser CLI</a>.
   </p>
 </p>
 
@@ -529,4 +532,10 @@ MIT
 
 <p align="center">
   <sub>Built with ❤️ for the AI-native CLI era.</sub>
+</p>
+
+---
+
+<p align="center">
+  <sub>Part of the <a href="https://chaser.sh"><strong>Chaser</strong></a> open-source ecosystem &nbsp;·&nbsp; <a href="https://chaser.sh/sprinter">Run it on your own infrastructure →</a></sub>
 </p>
